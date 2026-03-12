@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { X, Copy, Check, Loader2 } from "lucide-react";
 import { readFile } from "../../lib/claude-ipc";
+import { useT } from "../../lib/i18n";
 import hljs from "highlight.js";
 
 interface FileViewerProps {
@@ -54,6 +55,7 @@ export default function FileViewer({ filePath, onClose }: FileViewerProps) {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const codeRef = useRef<HTMLElement>(null);
+  const t = useT();
   const fileName = filePath.split("/").pop() || filePath;
   const lang = getLang(filePath);
 
@@ -101,7 +103,7 @@ export default function FileViewer({ filePath, onClose }: FileViewerProps) {
           )}
           {content !== null && (
             <span className="text-[10px] text-text-muted/50 flex-shrink-0">
-              {lineCount} lines
+              {lineCount} {t("viewer.lines")}
             </span>
           )}
         </div>
@@ -110,7 +112,7 @@ export default function FileViewer({ filePath, onClose }: FileViewerProps) {
             <button
               onClick={handleCopy}
               className="flex items-center gap-1 px-1.5 py-1 rounded text-text-muted hover:text-text-primary transition-colors"
-              title="Copy content"
+              title={t("viewer.copyContent")}
             >
               {copied ? (
                 <Check size={12} className="text-success" />
@@ -122,7 +124,7 @@ export default function FileViewer({ filePath, onClose }: FileViewerProps) {
           <button
             onClick={onClose}
             className="p-1 rounded hover:bg-bg-tertiary/50 text-text-muted hover:text-text-primary transition-colors"
-            title="Close"
+            title={t("viewer.close")}
           >
             <X size={14} />
           </button>
@@ -134,7 +136,7 @@ export default function FileViewer({ filePath, onClose }: FileViewerProps) {
         {content === null && !error && (
           <div className="flex items-center gap-2 p-4 text-xs text-text-muted">
             <Loader2 size={12} className="animate-spin" />
-            Loading...
+            {t("viewer.loading")}
           </div>
         )}
         {error && (

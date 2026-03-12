@@ -7,6 +7,7 @@ export interface Settings {
   claudePath: string;
   workingDirectory: string;
   theme: "dark" | "light";
+  locale: "en" | "zh";
   apiKey: string;
   baseUrl: string;
 }
@@ -26,6 +27,7 @@ const defaultSettings: Settings = {
   claudePath: "claude",
   workingDirectory: "",
   theme: "dark",
+  locale: "en",
   apiKey: "",
   baseUrl: "",
 };

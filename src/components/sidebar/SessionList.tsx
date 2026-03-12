@@ -2,6 +2,7 @@ import { useChatStore } from "../../stores/chatStore";
 import { stopSession } from "../../lib/claude-ipc";
 import { formatRelativeDate } from "../../lib/utils";
 import { FolderOpen, Trash2 } from "lucide-react";
+import { useT } from "../../lib/i18n";
 
 export default function SessionList() {
   const {
@@ -10,13 +11,14 @@ export default function SessionList() {
     switchSession,
     removeSession,
   } = useChatStore();
+  const t = useT();
 
   if (sessions.length === 0) {
     return (
       <div className="flex-1 px-3 py-8 text-center text-text-muted text-sm">
-        No sessions yet.
+        {t("session.empty")}
         <br />
-        Open a project to start!
+        {t("session.emptyHint")}
       </div>
     );
   }
@@ -57,7 +59,7 @@ export default function SessionList() {
             <button
               onClick={(e) => handleDelete(e, session.id)}
               className="flex-shrink-0 opacity-0 group-hover:opacity-100 p-1 hover:text-error transition-all"
-              title="Delete session"
+              title={t("session.delete")}
             >
               <Trash2 size={12} />
             </button>

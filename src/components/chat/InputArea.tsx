@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Send, Square, AlertCircle, ChevronDown, ChevronUp, GitBranch, Wrench, Check } from "lucide-react";
+import { useT } from "../../lib/i18n";
 
 interface InputAreaProps {
   onSend: (message: string) => void;
@@ -15,12 +16,6 @@ interface InputAreaProps {
   allowedTools?: string[];
   onAllowedToolsChange?: (tools: string[]) => void;
 }
-
-const MODE_OPTIONS = [
-  { value: "", label: "Default" },
-  { value: "auto", label: "Auto" },
-  { value: "plan", label: "Plan" },
-];
 
 const ALL_TOOLS = [
   { value: "Read", label: "Read" },
@@ -98,9 +93,11 @@ function DropdownSelect({
 function ToolsSelector({
   selected,
   onChange,
+  t,
 }: {
   selected: string[];
   onChange: (tools: string[]) => void;
+  t: (key: string) => string;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -134,7 +131,7 @@ function ToolsSelector({
                    transition-colors"
       >
         <Wrench size={11} />
-        <span>Tools ({selected.length})</span>
+        <span>{t("input.tools")} ({selected.length})</span>
         {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
       </button>
       {open && (
@@ -146,7 +143,7 @@ function ToolsSelector({
             className="block w-full text-left px-3 py-1.5 text-xs text-text-muted
                        hover:text-text-primary hover:bg-bg-tertiary/30 transition-colors border-b border-border"
           >
-            {allSelected ? "Deselect All" : "Select All"}
+            {allSelected ? t("input.deselectAll") : t("input.selectAll")}
           </button>
           {ALL_TOOLS.map((tool) => {
             const isSelected = selected.includes(tool.value);
@@ -193,6 +190,7 @@ export default function InputArea({
 }: InputAreaProps) {
   const [input, setInput] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const t = useT();
 
   const handleSend = useCallback(() => {
     const trimmed = input.trim();
@@ -235,7 +233,7 @@ export default function InputArea({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Send a message..."
+            placeholder={t("input.placeholder")}
             rows={1}
             disabled={disabled}
             className="flex-1 resize-none rounded-xl bg-input-bg border border-border px-4 py-3
@@ -249,7 +247,7 @@ export default function InputArea({
               onClick={onStop}
               className="flex items-center justify-center w-10 h-10 rounded-xl
                          bg-error/20 text-error hover:bg-error/30 transition-colors"
-              title="Stop generation"
+              title={t("input.stop")}
             >
               <Square size={18} />
             </button>
@@ -260,7 +258,7 @@ export default function InputArea({
               className="flex items-center justify-center w-10 h-10 rounded-xl
                          bg-accent text-white hover:bg-accent-hover transition-colors
                          disabled:opacity-30 disabled:cursor-not-allowed"
-              title="Send message"
+              title={t("input.send")}
             >
               <Send size={18} />
             </button>
@@ -270,7 +268,7 @@ export default function InputArea({
         {/* Toolbar: model, mode, tools, git branch */}
         {onModelChange && onPermissionModeChange && (
           <div className="flex items-center gap-1 mt-1.5 px-1">
-            <span className="text-[10px] text-text-muted mr-0.5">Model:</span>
+            <span className="text-[10px] text-text-muted mr-0.5">{t("input.model")}</span>
             {models.length > 0 ? (
               <DropdownSelect
                 value={model}
@@ -282,17 +280,21 @@ export default function InputArea({
                 type="text"
                 value={model}
                 onChange={(e) => onModelChange?.(e.target.value)}
-                placeholder="Add models in Settings"
+                placeholder={t("input.addModelsHint")}
                 className="w-48 px-2 py-0.5 rounded-md text-xs bg-transparent border border-transparent
                            text-text-secondary hover:border-border focus:border-accent focus:outline-none
                            placeholder:text-text-muted/50 transition-colors"
               />
             )}
             <span className="text-border mx-1">|</span>
-            <span className="text-[10px] text-text-muted mr-0.5">Mode:</span>
+            <span className="text-[10px] text-text-muted mr-0.5">{t("input.mode")}</span>
             <DropdownSelect
               value={permissionMode}
-              options={MODE_OPTIONS}
+              options={[
+                { value: "", label: t("mode.default") },
+                { value: "auto", label: t("mode.auto") },
+                { value: "plan", label: t("mode.plan") },
+              ]}
               onChange={onPermissionModeChange}
             />
             {onAllowedToolsChange && (
@@ -301,6 +303,7 @@ export default function InputArea({
                 <ToolsSelector
                   selected={allowedTools}
                   onChange={onAllowedToolsChange}
+                  t={t}
                 />
               </>
             )}
@@ -317,7 +320,7 @@ export default function InputArea({
         {disabled && (
           <div className="flex items-center gap-2 text-warning text-sm mt-2">
             <AlertCircle size={14} />
-            <span>Claude CLI not detected. Check Settings.</span>
+            <span>{t("input.cliNotDetected")}</span>
           </div>
         )}
       </div>

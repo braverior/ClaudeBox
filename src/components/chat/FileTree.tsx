@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { listDir, type DirEntry } from "../../lib/claude-ipc";
+import { useT } from "../../lib/i18n";
 import {
   ChevronRight,
   ChevronDown,
@@ -38,6 +39,7 @@ function TreeNode({ entry, depth, onFileSelect }: { entry: DirEntry; depth: numb
   const [expanded, setExpanded] = useState(false);
   const [children, setChildren] = useState<DirEntry[] | null>(null);
   const [loading, setLoading] = useState(false);
+  const t = useT();
 
   const toggle = useCallback(async () => {
     if (!entry.is_dir) {
@@ -91,7 +93,7 @@ function TreeNode({ entry, depth, onFileSelect }: { entry: DirEntry; depth: numb
               style={{ paddingLeft: `${(depth + 1) * 14 + 6}px` }}
             >
               <RefreshCw size={10} className="animate-spin" />
-              Loading...
+              {t("files.loading")}
             </div>
           )}
           {children?.map((child) => (
@@ -102,7 +104,7 @@ function TreeNode({ entry, depth, onFileSelect }: { entry: DirEntry; depth: numb
               className="py-1 text-xs text-text-muted italic"
               style={{ paddingLeft: `${(depth + 1) * 14 + 6}px` }}
             >
-              Empty
+              {t("files.empty")}
             </div>
           )}
         </div>
@@ -119,6 +121,7 @@ interface FileTreeProps {
 export default function FileTree({ rootPath, onFileSelect }: FileTreeProps) {
   const [entries, setEntries] = useState<DirEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const t = useT();
 
   const loadRoot = useCallback(async () => {
     setLoading(true);
@@ -138,11 +141,11 @@ export default function FileTree({ rootPath, onFileSelect }: FileTreeProps) {
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-3 py-2 border-b border-border">
-        <span className="text-xs font-medium text-text-secondary">Files</span>
+        <span className="text-xs font-medium text-text-secondary">{t("files.title")}</span>
         <button
           onClick={loadRoot}
           className="p-1 rounded hover:bg-bg-tertiary/50 text-text-muted hover:text-text-primary transition-colors"
-          title="Refresh"
+          title={t("files.refresh")}
         >
           <RefreshCw size={12} />
         </button>
@@ -151,10 +154,10 @@ export default function FileTree({ rootPath, onFileSelect }: FileTreeProps) {
         {loading ? (
           <div className="flex items-center gap-2 px-3 py-4 text-xs text-text-muted">
             <RefreshCw size={12} className="animate-spin" />
-            Loading...
+            {t("files.loading")}
           </div>
         ) : entries.length === 0 ? (
-          <div className="px-3 py-4 text-xs text-text-muted">No files</div>
+          <div className="px-3 py-4 text-xs text-text-muted">{t("files.noFiles")}</div>
         ) : (
           entries.map((entry) => (
             <TreeNode key={entry.path} entry={entry} depth={0} onFileSelect={onFileSelect} />

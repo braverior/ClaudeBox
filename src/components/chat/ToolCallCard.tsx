@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import type { ContentBlock, PendingInteraction } from "../../lib/stream-parser";
 import { openInBrowser } from "../../lib/claude-ipc";
+import { useT } from "../../lib/i18n";
 
 const TOOL_ICONS: Record<string, React.ReactNode> = {
   Read: <FileText size={14} />,
@@ -75,6 +76,7 @@ export default function ToolCallCard({ block, result, pendingInteraction, onResp
   const [expanded, setExpanded] = useState(false);
   const [customInputs, setCustomInputs] = useState<Record<string, string>>({});
   const [answered, setAnswered] = useState(false);
+  const t = useT();
   const toolName = block.name || "Tool";
   const icon = TOOL_ICONS[toolName] || <Terminal size={14} />;
   const input = block.input || {};
@@ -213,7 +215,7 @@ export default function ToolCallCard({ block, result, pendingInteraction, onResp
       <div className="rounded-lg border-2 border-accent/50 bg-accent/5 overflow-hidden">
         <div className="px-3 py-2 flex items-center gap-2 bg-accent/10">
           <MessageCircleQuestion size={14} className="text-accent" />
-          <span className="text-sm font-medium text-text-primary">Claude needs your input</span>
+          <span className="text-sm font-medium text-text-primary">{t("tool.needsInput")}</span>
         </div>
         <div className="px-3 py-3 space-y-4">
           {questions.map((q, qi) => (
@@ -257,7 +259,7 @@ export default function ToolCallCard({ block, result, pendingInteraction, onResp
               <div className="flex items-center gap-2 mt-2">
                 <input
                   type="text"
-                  placeholder="Other..."
+                  placeholder={t("tool.other")}
                   value={customInputs[q.question] || ""}
                   onChange={(e) =>
                     setCustomInputs({ ...customInputs, [q.question]: e.target.value })
@@ -287,7 +289,7 @@ export default function ToolCallCard({ block, result, pendingInteraction, onResp
                                hover:bg-accent/80 disabled:opacity-40 disabled:cursor-not-allowed
                                transition-colors"
                   >
-                    Send
+                    {t("tool.send")}
                   </button>
                 )}
               </div>
@@ -302,7 +304,7 @@ export default function ToolCallCard({ block, result, pendingInteraction, onResp
                          hover:bg-accent/80 disabled:opacity-40 disabled:cursor-not-allowed
                          transition-colors"
             >
-              Submit Answers ({Object.keys(answers).length}/{questions.length})
+              {t("tool.submitAnswers")} ({Object.keys(answers).length}/{questions.length})
             </button>
           )}
         </div>
@@ -322,13 +324,13 @@ export default function ToolCallCard({ block, result, pendingInteraction, onResp
       <div className="rounded-lg border-2 border-accent/50 bg-accent/5 overflow-hidden">
         <div className="px-3 py-2 flex items-center gap-2 bg-accent/10">
           <ClipboardCheck size={14} className="text-accent" />
-          <span className="text-sm font-medium text-text-primary">Plan ready — approve to proceed</span>
+          <span className="text-sm font-medium text-text-primary">{t("tool.planReady")}</span>
         </div>
         <div className="px-3 py-3">
           {/* Plan content preview */}
           {planContent && (
             <div className="mb-3">
-              <div className="text-xs text-text-muted mb-1">Plan:</div>
+              <div className="text-xs text-text-muted mb-1">{t("tool.plan")}</div>
               <pre className="text-xs bg-code-bg rounded p-3 max-h-64 overflow-y-auto whitespace-pre-wrap text-text-secondary">
                 {planContent}
               </pre>
@@ -336,7 +338,7 @@ export default function ToolCallCard({ block, result, pendingInteraction, onResp
           )}
           {allowedPrompts.length > 0 && (
             <div className="mb-3">
-              <div className="text-xs text-text-muted mb-1">Requested permissions:</div>
+              <div className="text-xs text-text-muted mb-1">{t("tool.permissions")}</div>
               <ul className="text-xs text-text-secondary space-y-0.5">
                 {allowedPrompts.map((p, i) => (
                   <li key={i} className="flex items-center gap-1.5">
@@ -353,7 +355,7 @@ export default function ToolCallCard({ block, result, pendingInteraction, onResp
               className="px-4 py-1.5 text-sm rounded-lg bg-success/90 text-white
                          hover:bg-success transition-colors font-medium"
             >
-              Approve
+              {t("tool.approve")}
             </button>
             <button
               onClick={() => handleExitPlanReject()}
@@ -361,7 +363,7 @@ export default function ToolCallCard({ block, result, pendingInteraction, onResp
                          text-text-secondary hover:bg-error/10 hover:text-error hover:border-error/30
                          transition-colors"
             >
-              Reject
+              {t("tool.reject")}
             </button>
           </div>
         </div>
@@ -417,7 +419,7 @@ export default function ToolCallCard({ block, result, pendingInteraction, onResp
             title={`Open ${detectedUrl}`}
           >
             <ExternalLink size={10} />
-            Open
+            {t("tool.open")}
           </span>
         )}
         {isDone ? (
@@ -434,7 +436,7 @@ export default function ToolCallCard({ block, result, pendingInteraction, onResp
         <div className="px-3 pb-3 border-t border-border">
           {/* Input */}
           <div className="mt-2">
-            <div className="text-xs text-text-muted mb-1">Input</div>
+            <div className="text-xs text-text-muted mb-1">{t("tool.input")}</div>
             <pre className="text-xs bg-code-bg rounded p-2 overflow-x-auto max-h-48 overflow-y-auto">
               {JSON.stringify(input, null, 2)}
             </pre>
@@ -444,7 +446,7 @@ export default function ToolCallCard({ block, result, pendingInteraction, onResp
           {resultText && (
             <div className="mt-2">
               <div className="text-xs text-text-muted mb-1">
-                {isError ? "Error" : "Output"}
+                {isError ? t("tool.error") : t("tool.output")}
               </div>
               <pre
                 className={`text-xs rounded p-2 overflow-x-auto max-h-48 overflow-y-auto ${
@@ -452,7 +454,7 @@ export default function ToolCallCard({ block, result, pendingInteraction, onResp
                 }`}
               >
                 {resultText.slice(0, 2000)}
-                {resultText.length > 2000 && "\n... (truncated)"}
+                {resultText.length > 2000 && `\n${t("tool.truncated")}`}
               </pre>
             </div>
           )}

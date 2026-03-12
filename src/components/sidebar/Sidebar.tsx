@@ -6,11 +6,13 @@ import {
   FolderOpen,
   Sun,
   Moon,
+  Languages,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import SessionList from "./SessionList";
 import { useChatStore } from "../../stores/chatStore";
 import { useSettingsStore } from "../../stores/settingsStore";
+import { useT } from "../../lib/i18n";
 
 interface SidebarProps {
   onOpenSettings: () => void;
@@ -20,15 +22,19 @@ export default function Sidebar({ onOpenSettings }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
   const { settings, updateSettings } = useSettingsStore();
   const { createSession } = useChatStore();
+  const t = useT();
 
   const toggleTheme = () => {
     updateSettings({ theme: settings.theme === "dark" ? "light" : "dark" });
   };
 
+  const toggleLocale = () => {
+    updateSettings({ locale: settings.locale === "en" ? "zh" : "en" });
+  };
+
   const handleOpenProject = async () => {
     const selected = await open({ directory: true, multiple: false });
     if (selected && typeof selected === "string") {
-      // Directly create session using current settings, no dialog
       createSession(selected, settings.model || "", settings.permissionMode || "");
     }
   };
@@ -41,7 +47,7 @@ export default function Sidebar({ onOpenSettings }: SidebarProps) {
         <button
           onClick={() => setCollapsed(false)}
           className="p-2 rounded-lg hover:bg-bg-tertiary/50 text-text-secondary hover:text-text-primary transition-colors"
-          title="Expand sidebar"
+          title={t("sidebar.expandSidebar")}
         >
           <PanelLeft size={18} />
         </button>
@@ -62,7 +68,7 @@ export default function Sidebar({ onOpenSettings }: SidebarProps) {
         <button
           onClick={() => setCollapsed(true)}
           className="p-1.5 rounded-lg hover:bg-bg-tertiary/50 text-text-secondary hover:text-text-primary transition-colors"
-          title="Collapse sidebar"
+          title={t("sidebar.collapseSidebar")}
         >
           <PanelLeftClose size={16} />
         </button>
@@ -77,7 +83,7 @@ export default function Sidebar({ onOpenSettings }: SidebarProps) {
                      text-sm font-medium"
         >
           <FolderOpen size={16} />
-          <span>Open Project</span>
+          <span>{t("sidebar.openProject")}</span>
         </button>
       </div>
 
@@ -87,16 +93,23 @@ export default function Sidebar({ onOpenSettings }: SidebarProps) {
       {/* Footer */}
       <div className="border-t border-border px-2 py-2 flex items-center gap-1">
         <button
+          onClick={toggleLocale}
+          className="p-2 rounded-lg text-text-secondary hover:bg-bg-tertiary/50 hover:text-text-primary transition-colors"
+          title={settings.locale === "en" ? "切换到中文" : "Switch to English"}
+        >
+          <Languages size={16} />
+        </button>
+        <button
           onClick={toggleTheme}
           className="p-2 rounded-lg text-text-secondary hover:bg-bg-tertiary/50 hover:text-text-primary transition-colors"
-          title={settings.theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+          title={settings.theme === "dark" ? t("sidebar.lightMode") : t("sidebar.darkMode")}
         >
           {settings.theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
         </button>
         <button
           onClick={onOpenSettings}
           className="p-2 rounded-lg text-text-secondary hover:bg-bg-tertiary/50 hover:text-text-primary transition-colors"
-          title="Settings"
+          title={t("sidebar.settings")}
         >
           <Settings size={16} />
         </button>

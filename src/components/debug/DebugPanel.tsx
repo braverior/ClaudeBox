@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Bug, X, Trash2 } from "lucide-react";
 import { onDebug } from "../../lib/claude-ipc";
+import { useT } from "../../lib/i18n";
 import type { DebugEvent } from "../../lib/stream-parser";
 
 const LEVEL_COLORS: Record<string, string> = {
@@ -33,6 +34,7 @@ export default function DebugPanel({ visible, onClose }: DebugPanelProps) {
   const [autoScroll, setAutoScroll] = useState(true);
   const [filter, setFilter] = useState<string>("all");
   const bottomRef = useRef<HTMLDivElement>(null);
+  const t = useT();
 
   useEffect(() => {
     const unlisten = onDebug((event) => {
@@ -80,7 +82,7 @@ export default function DebugPanel({ visible, onClose }: DebugPanelProps) {
         <div className="flex items-center gap-2">
           <Bug size={14} className="text-purple-400" />
           <span className="text-sm font-semibold text-text-primary">
-            Debug Console
+            {t("debug.title")}
           </span>
           <span className="text-xs text-text-muted">({logs.length})</span>
         </div>
@@ -88,14 +90,14 @@ export default function DebugPanel({ visible, onClose }: DebugPanelProps) {
           <button
             onClick={() => setLogs([])}
             className="p-1 rounded hover:bg-bg-secondary text-text-muted hover:text-text-primary transition-colors"
-            title="Clear logs"
+            title={t("debug.clearLogs")}
           >
             <Trash2 size={12} />
           </button>
           <button
             onClick={onClose}
             className="p-1 rounded hover:bg-bg-secondary text-text-muted hover:text-text-primary transition-colors"
-            title="Close debug panel"
+            title={t("debug.close")}
           >
             <X size={14} />
           </button>
@@ -127,7 +129,7 @@ export default function DebugPanel({ visible, onClose }: DebugPanelProps) {
             onChange={(e) => setAutoScroll(e.target.checked)}
             className="w-3 h-3"
           />
-          Auto-scroll
+          {t("debug.autoScroll")}
         </label>
       </div>
 
@@ -135,7 +137,7 @@ export default function DebugPanel({ visible, onClose }: DebugPanelProps) {
       <div className="flex-1 overflow-y-auto font-mono text-xs leading-relaxed">
         {filtered.length === 0 && (
           <div className="text-center py-8 text-text-muted">
-            No debug logs yet. Start a session and send a message.
+            {t("debug.empty")}
           </div>
         )}
         {filtered.map((log, i) => (

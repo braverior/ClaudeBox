@@ -3,6 +3,7 @@ import { useChatStore } from "../../stores/chatStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { sendMessage, stopSession, onStream, getGitBranch, sendResponse } from "../../lib/claude-ipc";
 import { getCurrentWindow, PhysicalSize } from "@tauri-apps/api/window";
+import { useT } from "../../lib/i18n";
 import MessageBubble from "./MessageBubble";
 import InputArea from "./InputArea";
 import TaskBoard from "./TaskBoard";
@@ -34,6 +35,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
   } = useChatStore();
 
   const { settings } = useSettingsStore();
+  const t = useT();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const currentSession = sessions.find((s) => s.id === currentSessionId);
   const [gitBranch, setGitBranch] = useState<string | null>(null);
@@ -94,14 +96,14 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
         if (!effectiveModel) missing.push("Model");
         addSystemMessage(
           currentSessionId,
-          `⚠️ Missing configuration: ${missing.join(", ")}. Please configure in Settings (API Key is required for Agent SDK mode).`
+          `⚠️ ${t("chat.missingConfig", { items: missing.join(", ") })}`
         );
         return;
       }
       if (!effectiveModel) {
         addSystemMessage(
           currentSessionId,
-          `⚠️ No model configured. Please set a model (e.g. claude-sonnet-4-20250514) in Settings or session toolbar.`
+          `⚠️ ${t("chat.noModel")}`
         );
         return;
       }
@@ -206,14 +208,14 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
               <Sparkles size={32} className="text-accent" />
             </div>
             <h2 className="text-xl font-semibold text-text-primary mb-2">
-              Welcome to ClaudeBox
+              {t("welcome.title")}
             </h2>
             <p className="text-text-secondary text-sm max-w-md mb-4">
-              Open a project folder to start a Claude Code session.
+              {t("welcome.desc")}
             </p>
             <div className="flex items-center gap-2 justify-center text-text-muted text-xs">
               <FolderOpen size={14} />
-              <span>Click &quot;Open Project&quot; in the sidebar to begin</span>
+              <span>{t("welcome.hint")}</span>
             </div>
           </div>
         </div>
@@ -241,7 +243,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
         <button
           onClick={toggleFilePanel}
           className="p-1.5 rounded-lg hover:bg-bg-tertiary/50 text-text-secondary hover:text-text-primary transition-colors"
-          title={showFilePanel ? "Close file panel" : "Open file panel"}
+          title={showFilePanel ? t("chat.closeFilePanel") : t("chat.openFilePanel")}
         >
           {showFilePanel ? <PanelRightClose size={16} /> : <PanelRight size={16} />}
         </button>
@@ -258,7 +260,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
                 <div className="text-center py-16 text-text-muted">
                   <Terminal size={24} className="mx-auto mb-2 opacity-50" />
                   <p className="text-sm">
-                    Send a message to start working with Claude in this project.
+                    {t("chat.emptyHint")}
                   </p>
                 </div>
               )}

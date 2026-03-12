@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { X, CheckCircle, XCircle, Loader2, ScrollText, Plus, Trash2, Copy, Check } from "lucide-react";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { checkClaudeInstalled } from "../../lib/claude-ipc";
+import { useT } from "../../lib/i18n";
 
 function getInstallInstructions(): { platform: string; command: string; note: string } {
   const ua = navigator.userAgent.toLowerCase();
@@ -35,6 +36,7 @@ interface SettingsDialogProps {
 
 function InstallInstructions() {
   const [copied, setCopied] = useState(false);
+  const t = useT();
   const info = getInstallInstructions();
   const handleCopy = () => {
     navigator.clipboard.writeText(info.command);
@@ -44,14 +46,14 @@ function InstallInstructions() {
   return (
     <div className="mt-2 rounded-lg bg-bg-secondary border border-border p-3">
       <p className="text-xs text-text-secondary mb-2">
-        Install Claude Code for <span className="font-medium text-text-primary">{info.platform}</span>:
+        {t("settings.installFor")} <span className="font-medium text-text-primary">{info.platform}</span>:
       </p>
       <div className="flex items-center gap-2 bg-code-bg rounded-md px-3 py-2">
         <code className="text-xs text-text-primary flex-1 select-all">{info.command}</code>
         <button
           onClick={handleCopy}
           className="p-1 rounded text-text-muted hover:text-text-primary transition-colors flex-shrink-0"
-          title="Copy command"
+          title={t("settings.copyCommand")}
         >
           {copied ? <Check size={12} className="text-success" /> : <Copy size={12} />}
         </button>
@@ -68,6 +70,7 @@ export default function SettingsDialog({
   onOpenDebug,
 }: SettingsDialogProps) {
   const { settings, updateSettings } = useSettingsStore();
+  const t = useT();
   const [claudeVersion, setClaudeVersion] = useState<string | null>(null);
   const [claudeError, setClaudeError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
@@ -106,7 +109,7 @@ export default function SettingsDialog({
       <div className="bg-bg-primary border border-border rounded-2xl w-[480px] max-h-[80vh] overflow-y-auto shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-          <h2 className="text-lg font-semibold text-text-primary">Settings</h2>
+          <h2 className="text-lg font-semibold text-text-primary">{t("settings.title")}</h2>
           <button
             onClick={onClose}
             className="p-1.5 rounded-lg hover:bg-bg-secondary text-text-secondary hover:text-text-primary transition-colors"
@@ -119,7 +122,7 @@ export default function SettingsDialog({
           {/* Claude CLI Status */}
           <div>
             <label className="text-sm font-medium text-text-primary block mb-2">
-              Claude CLI Status
+              {t("settings.cliStatus")}
             </label>
             <div className="flex items-center gap-2 text-sm">
               {checking ? (
@@ -128,7 +131,7 @@ export default function SettingsDialog({
                     size={14}
                     className="animate-spin text-text-muted"
                   />
-                  <span className="text-text-muted">Checking...</span>
+                  <span className="text-text-muted">{t("settings.checking")}</span>
                 </>
               ) : claudeVersion ? (
                 <>
@@ -139,7 +142,7 @@ export default function SettingsDialog({
                 <>
                   <XCircle size={14} className="text-error" />
                   <span className="text-error text-xs">
-                    {claudeError || "Not found"}
+                    {claudeError || t("settings.notFound")}
                   </span>
                 </>
               )}
@@ -147,7 +150,7 @@ export default function SettingsDialog({
                 onClick={checkClaude}
                 className="ml-auto text-xs text-accent hover:text-accent-hover transition-colors"
               >
-                Re-check
+                {t("settings.recheck")}
               </button>
             </div>
             {/* Install instructions when not found */}
@@ -157,7 +160,7 @@ export default function SettingsDialog({
           {/* Claude CLI Path */}
           <div>
             <label className="text-sm font-medium text-text-primary block mb-1.5">
-              Claude CLI Path
+              {t("settings.cliPath")}
             </label>
             <input
               type="text"
@@ -169,14 +172,14 @@ export default function SettingsDialog({
                          focus:outline-none focus:ring-2 focus:ring-accent/50"
             />
             <p className="text-xs text-text-muted mt-1">
-              Path to claude CLI binary. Use "claude" for global install.
+              {t("settings.cliPathHint")}
             </p>
           </div>
 
           {/* Models */}
           <div>
             <label className="text-sm font-medium text-text-primary block mb-1.5">
-              Models
+              {t("settings.models")}
             </label>
             <div className="flex gap-2">
               <input
@@ -214,7 +217,7 @@ export default function SettingsDialog({
                            flex items-center gap-1"
               >
                 <Plus size={14} />
-                Add
+                {t("settings.add")}
               </button>
             </div>
             {settings.models.length > 0 && (
@@ -227,7 +230,7 @@ export default function SettingsDialog({
                     <span className={`text-text-primary truncate ${m === settings.model ? "font-medium" : ""}`}>
                       {m}
                       {m === settings.model && (
-                        <span className="ml-2 text-xs text-accent">(active)</span>
+                        <span className="ml-2 text-xs text-accent">{t("settings.active")}</span>
                       )}
                     </span>
                     <button
@@ -241,7 +244,7 @@ export default function SettingsDialog({
                       }}
                       className="p-1 rounded hover:bg-error/20 text-text-muted hover:text-error
                                  transition-colors opacity-0 group-hover:opacity-100"
-                      title="Remove model"
+                      title={t("settings.removeModel")}
                     >
                       <Trash2 size={13} />
                     </button>
@@ -250,14 +253,14 @@ export default function SettingsDialog({
               </div>
             )}
             <p className="text-xs text-text-muted mt-1">
-              Add model IDs to switch between them in the chat toolbar.
+              {t("settings.modelsHint")}
             </p>
           </div>
 
           {/* Default Permission Mode */}
           <div>
             <label className="text-sm font-medium text-text-primary block mb-1.5">
-              Default Permission Mode
+              {t("settings.permissionMode")}
             </label>
             <select
               value={settings.permissionMode}
@@ -267,16 +270,16 @@ export default function SettingsDialog({
               className="w-full rounded-lg bg-input-bg border border-border px-3 py-2 text-sm
                          text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/50"
             >
-              <option value="">Default</option>
-              <option value="auto">Auto Accept</option>
-              <option value="plan">Plan Mode</option>
+              <option value="">{t("settings.modeDefault")}</option>
+              <option value="auto">{t("settings.modeAuto")}</option>
+              <option value="plan">{t("settings.modePlan")}</option>
             </select>
           </div>
 
           {/* API Key */}
           <div>
             <label className="text-sm font-medium text-text-primary block mb-1.5">
-              Anthropic API Key
+              {t("settings.apiKey")}
             </label>
             <input
               type="password"
@@ -288,14 +291,14 @@ export default function SettingsDialog({
                          focus:outline-none focus:ring-2 focus:ring-accent/50"
             />
             <p className="text-xs text-text-muted mt-1">
-              Optional. Leave empty to use Claude CLI&apos;s built-in auth or shell env ANTHROPIC_API_KEY.
+              {t("settings.apiKeyHint")}
             </p>
           </div>
 
           {/* Base URL */}
           <div>
             <label className="text-sm font-medium text-text-primary block mb-1.5">
-              API Base URL
+              {t("settings.baseUrl")}
             </label>
             <input
               type="text"
@@ -307,7 +310,7 @@ export default function SettingsDialog({
                          focus:outline-none focus:ring-2 focus:ring-accent/50"
             />
             <p className="text-xs text-text-muted mt-1">
-              Optional. Override the Anthropic API endpoint (for proxies).
+              {t("settings.baseUrlHint")}
             </p>
           </div>
         </div>
@@ -325,7 +328,7 @@ export default function SettingsDialog({
                          transition-colors text-sm font-medium flex items-center justify-center gap-2"
             >
               <ScrollText size={14} />
-              View Logs
+              {t("settings.viewLogs")}
             </button>
           )}
           <button
@@ -333,7 +336,7 @@ export default function SettingsDialog({
             className="w-full py-2 rounded-lg bg-accent text-white hover:bg-accent-hover
                        transition-colors text-sm font-medium"
           >
-            Done
+            {t("settings.done")}
           </button>
         </div>
       </div>
