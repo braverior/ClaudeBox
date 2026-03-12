@@ -52,12 +52,12 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
     try {
       const win = getCurrentWindow();
       const size = await win.outerSize();
-      const delta = next ? FILE_PANEL_WIDTH : -(openFilePath ? 560 : FILE_PANEL_WIDTH);
+      const delta = next ? FILE_PANEL_WIDTH : -FILE_PANEL_WIDTH;
       await win.setSize(new PhysicalSize(size.width + delta, size.height));
     } catch {
       // ignore — window API may not be available in dev
     }
-  }, [showFilePanel, openFilePath]);
+  }, [showFilePanel]);
 
   // Fetch git branch when session changes
   useEffect(() => {
@@ -246,14 +246,14 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
         {/* Drag spacer — fills remaining space for window dragging */}
         <div className="flex-1" data-tauri-drag-region />
         {gitBranch && (
-          <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-bg-tertiary text-text-muted pointer-events-none">
-            <GitBranch size={11} />
-            {gitBranch}
+          <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-bg-tertiary text-text-muted pointer-events-none max-w-[150px]">
+            <GitBranch size={11} className="flex-shrink-0" />
+            <span className="truncate">{gitBranch}</span>
           </span>
         )}
         <button
           onClick={toggleFilePanel}
-          className="p-1.5 rounded-lg hover:bg-bg-tertiary/50 text-text-secondary hover:text-text-primary transition-colors"
+          className="flex-shrink-0 p-1.5 rounded-lg hover:bg-bg-tertiary/50 text-text-secondary hover:text-text-primary transition-colors"
           title={showFilePanel ? t("chat.closeFilePanel") : t("chat.openFilePanel")}
         >
           {showFilePanel ? <PanelRightClose size={16} /> : <PanelRight size={16} />}
@@ -264,95 +264,95 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
       <div className="flex-1 flex min-h-0">
         {/* Chat area */}
         <div className="flex-1 flex flex-col min-w-0">
-          {/* Messages */}
-          <div className="flex-1 overflow-y-auto py-4">
-            <div className="max-w-3xl mx-auto overflow-hidden">
-              {currentMessages.length === 0 && (
-                <div className="text-center py-16 text-text-muted">
-                  <Terminal size={24} className="mx-auto mb-2 opacity-50" />
-                  <p className="text-sm">
-                    {t("chat.emptyHint")}
-                  </p>
+          {openFilePath ? (
+            /* File viewer overlay — covers entire chat area for maximum reading space */
+            <FileViewer
+              filePath={openFilePath}
+              onClose={() => setOpenFilePath(null)}
+            />
+          ) : (
+            <>
+              {/* Messages */}
+              <div className="flex-1 overflow-y-auto py-4">
+                <div className="max-w-3xl mx-auto overflow-hidden">
+                  {currentMessages.length === 0 && (
+                    <div className="text-center py-16 text-text-muted">
+                      <Terminal size={24} className="mx-auto mb-2 opacity-50" />
+                      <p className="text-sm">
+                        {t("chat.emptyHint")}
+                      </p>
+                    </div>
+                  )}
+                  {currentMessages.map((msg, i) => {
+                    // Only show bot avatar on the first assistant message in a consecutive group
+                    let showAvatar = true;
+                    if (msg.role === "assistant" && i > 0) {
+                      const prev = currentMessages[i - 1];
+                      if (prev.role === "assistant") showAvatar = false;
+                    }
+                    // Last assistant in its consecutive run (before a user msg or end of list)
+                    const isLastInTurn =
+                      msg.role === "assistant" &&
+                      (i + 1 >= currentMessages.length || currentMessages[i + 1].role !== "assistant");
+                    // The very last assistant message overall
+                    const isLastAssistant =
+                      msg.role === "assistant" &&
+                      !currentMessages.slice(i + 1).some((m) => m.role === "assistant");
+                    return (
+                      <MessageBubble
+                        key={msg.id}
+                        message={msg}
+                        allMessages={currentMessages}
+                        messageIndex={i}
+                        showAvatar={showAvatar}
+                        isLastInTurn={isLastInTurn}
+                        isLastAssistant={isLastAssistant}
+                        totalTokens={totalTokens}
+                        streamStartTime={streamStartTime}
+                        pendingInteraction={isLastAssistant ? pendingInteraction : undefined}
+                        onRespond={isLastAssistant ? handleRespond : undefined}
+                      />
+                    );
+                  })}
                 </div>
-              )}
-              {currentMessages.map((msg, i) => {
-                // Only show bot avatar on the first assistant message in a consecutive group
-                let showAvatar = true;
-                if (msg.role === "assistant" && i > 0) {
-                  const prev = currentMessages[i - 1];
-                  if (prev.role === "assistant") showAvatar = false;
-                }
-                // Last assistant in its consecutive run (before a user msg or end of list)
-                const isLastInTurn =
-                  msg.role === "assistant" &&
-                  (i + 1 >= currentMessages.length || currentMessages[i + 1].role !== "assistant");
-                // The very last assistant message overall
-                const isLastAssistant =
-                  msg.role === "assistant" &&
-                  !currentMessages.slice(i + 1).some((m) => m.role === "assistant");
-                return (
-                  <MessageBubble
-                    key={msg.id}
-                    message={msg}
-                    allMessages={currentMessages}
-                    messageIndex={i}
-                    showAvatar={showAvatar}
-                    isLastInTurn={isLastInTurn}
-                    isLastAssistant={isLastAssistant}
-                    totalTokens={totalTokens}
-                    streamStartTime={streamStartTime}
-                    pendingInteraction={isLastAssistant ? pendingInteraction : undefined}
-                    onRespond={isLastAssistant ? handleRespond : undefined}
-                  />
-                );
-              })}
-            </div>
 
-            {streamError && (
-              <div className="max-w-3xl mx-auto px-4 mb-4">
-                <div className="rounded-lg bg-error/10 border border-error/30 px-4 py-3 text-error text-sm">
-                  {streamError}
-                </div>
+                {streamError && (
+                  <div className="max-w-3xl mx-auto px-4 mb-4">
+                    <div className="rounded-lg bg-error/10 border border-error/30 px-4 py-3 text-error text-sm">
+                      {streamError}
+                    </div>
+                  </div>
+                )}
+
+                <div ref={messagesEndRef} />
               </div>
-            )}
 
-            <div ref={messagesEndRef} />
-          </div>
+              {/* Task Board (above input) */}
+              <TaskBoard sessionId={currentSessionId} />
 
-          {/* Task Board (above input) */}
-          <TaskBoard sessionId={currentSessionId} />
-
-          {/* Input */}
-          <InputArea
-            onSend={handleSend}
-            onStop={handleStop}
-            isStreaming={isStreaming}
-            disabled={!claudeAvailable}
-            model={currentSession?.model || ""}
-            models={settings.models}
-            permissionMode={currentSession?.permissionMode || ""}
-            onModelChange={handleModelChange}
-            onPermissionModeChange={handlePermissionModeChange}
-            gitBranch={gitBranch}
-            allowedTools={currentSession?.allowedTools || []}
-            onAllowedToolsChange={handleAllowedToolsChange}
-          />
+              {/* Input */}
+              <InputArea
+                onSend={handleSend}
+                onStop={handleStop}
+                isStreaming={isStreaming}
+                disabled={!claudeAvailable}
+                model={currentSession?.model || ""}
+                models={settings.models}
+                permissionMode={currentSession?.permissionMode || ""}
+                onModelChange={handleModelChange}
+                onPermissionModeChange={handlePermissionModeChange}
+                gitBranch={gitBranch}
+                allowedTools={currentSession?.allowedTools || []}
+                onAllowedToolsChange={handleAllowedToolsChange}
+              />
+            </>
+          )}
         </div>
 
-        {/* File panel */}
+        {/* File panel — tree only, viewer is shown in the chat area */}
         {showFilePanel && currentSession?.projectPath && (
-          <div className={`border-l border-border bg-bg-secondary flex-shrink-0 flex ${openFilePath ? "w-[560px]" : "w-64"}`}>
-            <div className="w-64 flex-shrink-0">
-              <FileTree rootPath={currentSession.projectPath} onFileSelect={setOpenFilePath} />
-            </div>
-            {openFilePath && (
-              <div className="flex-1 border-l border-border min-w-0">
-                <FileViewer
-                  filePath={openFilePath}
-                  onClose={() => setOpenFilePath(null)}
-                />
-              </div>
-            )}
+          <div className="w-64 border-l border-border bg-bg-secondary flex-shrink-0">
+            <FileTree rootPath={currentSession.projectPath} onFileSelect={setOpenFilePath} />
           </div>
         )}
       </div>

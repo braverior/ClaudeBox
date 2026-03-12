@@ -89,7 +89,7 @@ export default function FileViewer({ filePath, onClose }: FileViewerProps) {
   const lineCount = content?.split("\n").length ?? 0;
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full min-w-0 overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-code-header flex-shrink-0">
         <div className="flex items-center gap-2 min-w-0">
@@ -143,7 +143,7 @@ export default function FileViewer({ filePath, onClose }: FileViewerProps) {
           <div className="p-4 text-xs text-error">{error}</div>
         )}
         {content !== null && (
-          <pre className="p-3 text-[0.8rem] leading-[1.6] m-0">
+          <pre className="p-3 text-[0.8rem] leading-[1.6] m-0 whitespace-pre-wrap [overflow-wrap:anywhere]">
             <code
               ref={codeRef}
               className={lang ? `language-${lang}` : ""}

@@ -244,11 +244,23 @@ export default function MessageBubble({
           {isLastInTurn && !message.isStreaming && (
             <div className="flex items-center gap-3 px-1 mt-1 mb-2 text-xs text-text-muted">
               <span>{formatTimeWithSeconds(message.timestamp)}</span>
-              {isLastAssistant && streamStartTime && (
-                <span>{formatDuration(message.timestamp - streamStartTime)}</span>
-              )}
+              {/* Duration: from stored turnMeta (completed) or live calc (most recent) */}
+              {message.turnMeta && message.turnMeta.durationMs > 0 ? (
+                <span>{formatDuration(message.turnMeta.durationMs)}</span>
+              ) : isLastAssistant && streamStartTime ? (
+                <span>{formatDuration(Math.max(0, message.timestamp - streamStartTime))}</span>
+              ) : null}
               {message.model && <span>{message.model}</span>}
-              {isLastAssistant && totalTokens > 0 && <span>{totalTokens.toLocaleString()} tokens</span>}
+              {/* Tokens: from stored turnMeta (completed) or live calc (most recent) */}
+              {message.turnMeta && message.turnMeta.tokens > 0 ? (
+                <span>{message.turnMeta.tokens.toLocaleString()} tokens</span>
+              ) : isLastAssistant && totalTokens > 0 ? (
+                <span>{totalTokens.toLocaleString()} tokens</span>
+              ) : null}
+              {/* Cost from turnMeta */}
+              {message.turnMeta?.costUsd != null && message.turnMeta.costUsd > 0 && (
+                <span>${message.turnMeta.costUsd.toFixed(4)}</span>
+              )}
             </div>
           )}
         </div>

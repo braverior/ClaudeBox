@@ -86,6 +86,12 @@ export interface ChatMessage {
   isStreaming?: boolean;
   /** Track the original stream message id so we can append content blocks for the same turn */
   streamMessageId?: string;
+  /** Per-turn metadata, stored on the last assistant message when the turn completes */
+  turnMeta?: {
+    tokens: number;
+    durationMs: number;
+    costUsd?: number;
+  };
 }
 
 export interface ToolCall {

@@ -355,16 +355,37 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
         }
       } else if (event.type === "result") {
+        // Calculate turn tokens and duration, store on the last assistant message
+        const startTime = get().streamStartTimes[sessionId];
+        let turnTokens = 0;
+        let lastAssistantIdx = -1;
+        for (let i = msgs.length - 1; i >= 0; i--) {
+          if (msgs[i].role === "user") break;
+          if (msgs[i].role === "assistant") {
+            if (lastAssistantIdx === -1) lastAssistantIdx = i;
+            if (msgs[i].usage) {
+              turnTokens += (msgs[i].usage!.input_tokens || 0) + (msgs[i].usage!.output_tokens || 0);
+            }
+          }
+        }
+        if (lastAssistantIdx >= 0) {
+          const durationMs = startTime
+            ? Math.max(0, Date.now() - startTime)
+            : (event.duration_ms || 0);
+          msgs[lastAssistantIdx] = {
+            ...msgs[lastAssistantIdx],
+            turnMeta: {
+              tokens: turnTokens,
+              durationMs,
+              costUsd: event.total_cost_usd,
+            },
+          };
+        }
         // Mark all streaming messages as done
         for (let i = 0; i < msgs.length; i++) {
           if (msgs[i].isStreaming) {
             msgs[i] = { ...msgs[i], isStreaming: false };
           }
-        }
-        // Update usage from result if available
-        const lastAssistant = [...msgs].reverse().find((m) => m.role === "assistant");
-        if (lastAssistant && event.total_cost_usd !== undefined) {
-          // Store cost info if needed in the future
         }
         set({ isStreaming: false, pendingInteraction: null });
       } else if (event.type === "ask_user" && event.requestId) {

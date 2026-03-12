@@ -15,13 +15,18 @@ export function formatTime(ts: number): string {
   });
 }
 
-/** Format a timestamp with seconds precision */
+/** Format a timestamp with date and seconds precision (YYYY-MM-DD HH:MM:SS) */
 export function formatTimeWithSeconds(ts: number): string {
-  return new Date(ts).toLocaleTimeString([], {
+  const d = new Date(ts);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  const time = d.toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
   });
+  return `${year}-${month}-${day} ${time}`;
 }
 
 /** Format a duration in milliseconds to human-readable string */
