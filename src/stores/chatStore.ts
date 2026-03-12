@@ -382,6 +382,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             type: "exit_plan",
             requestId: event.requestId,
             input: event.input,
+            planContent: event.planContent,
           },
         });
       } else if (event.type === "error") {

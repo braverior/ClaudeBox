@@ -24,8 +24,8 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { createInterface } from "node:readline";
 import { execSync, spawnSync } from "node:child_process";
-import { writeFileSync, mkdtempSync, chmodSync, unlinkSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync, mkdtempSync, chmodSync, unlinkSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 
 // ── Pre-flight & diagnostics ────────────────────────────────────────
@@ -194,15 +194,26 @@ function waitForResponse(requestId) {
  * canUseTool callback — intercepts AskUserQuestion and ExitPlanMode.
  * For other tools, auto-allow if in allowedTools list or deny.
  */
-function makeCanUseTool(allowedTools) {
+function makeCanUseTool(allowedTools, cwd) {
   return async (toolName, input, _options) => {
     // AskUserQuestion — send to frontend, wait for user answer
     if (toolName === "AskUserQuestion") {
+      // Fix: model sometimes sends questions as a JSON string instead of array
+      let questions = input.questions || [];
+      if (typeof questions === "string") {
+        try {
+          questions = JSON.parse(questions);
+        } catch {
+          console.error(`[bridge] Failed to parse questions string: ${questions.slice(0, 200)}`);
+          questions = [];
+        }
+      }
+
       const requestId = nextRequestId();
       emit({
         type: "ask_user",
         requestId,
-        questions: input.questions || [],
+        questions,
       });
       const resp = await waitForResponse(requestId);
       if (resp.behavior === "allow") {
@@ -210,6 +221,7 @@ function makeCanUseTool(allowedTools) {
           behavior: "allow",
           updatedInput: {
             ...input,
+            questions, // ensure it's the parsed array
             answers: resp.answers || {},
             annotations: resp.annotations,
           },
@@ -218,13 +230,22 @@ function makeCanUseTool(allowedTools) {
       return { behavior: "deny", message: resp.message || "User cancelled" };
     }
 
-    // ExitPlanMode — send to frontend, wait for approval
+    // ExitPlanMode — read plan file content, send to frontend, wait for approval
     if (toolName === "ExitPlanMode") {
+      // Try to find and read the most recent plan file
+      let planContent = "";
+      try {
+        planContent = findLatestPlanContent(cwd);
+      } catch (e) {
+        console.error(`[bridge] Failed to read plan file: ${e.message}`);
+      }
+
       const requestId = nextRequestId();
       emit({
         type: "exit_plan",
         requestId,
         input,
+        planContent,
       });
       const resp = await waitForResponse(requestId);
       if (resp.behavior === "allow") {
@@ -240,6 +261,57 @@ function makeCanUseTool(allowedTools) {
     // (The SDK + permissionMode handles the rest)
     return { behavior: "allow" };
   };
+}
+
+/**
+ * Find and read the most recently modified plan file from .claude/plans/
+ */
+function findLatestPlanContent(cwd) {
+  // Plans are stored in ~/.claude/projects/{project-key}/plans/ or in the project's .claude/plans/
+  const searchDirs = [];
+
+  // 1. Project-local .claude/plans/
+  if (cwd) {
+    searchDirs.push(join(cwd, ".claude", "plans"));
+  }
+
+  // 2. Global ~/.claude/projects/ (search for directories matching the cwd)
+  const globalBase = join(homedir(), ".claude", "projects");
+  try {
+    for (const entry of readdirSync(globalBase)) {
+      const plansDir = join(globalBase, entry, "plans");
+      try {
+        statSync(plansDir);
+        searchDirs.push(plansDir);
+      } catch { /* not a dir */ }
+    }
+  } catch { /* no global projects dir */ }
+
+  // Find the most recently modified .md file across all search dirs
+  let latestFile = null;
+  let latestMtime = 0;
+
+  for (const dir of searchDirs) {
+    try {
+      for (const file of readdirSync(dir)) {
+        if (!file.endsWith(".md")) continue;
+        const fullPath = join(dir, file);
+        const st = statSync(fullPath);
+        if (st.mtimeMs > latestMtime) {
+          latestMtime = st.mtimeMs;
+          latestFile = fullPath;
+        }
+      }
+    } catch { /* dir doesn't exist */ }
+  }
+
+  if (latestFile && Date.now() - latestMtime < 60000) {
+    // Only read if modified within the last 60 seconds (likely the current plan)
+    console.error(`[bridge] Reading plan file: ${latestFile}`);
+    return readFileSync(latestFile, "utf-8");
+  }
+
+  return "";
 }
 
 async function main() {
@@ -297,7 +369,7 @@ async function main() {
   /** @type {import("@anthropic-ai/claude-agent-sdk").Options} */
   const options = {
     abortController,
-    canUseTool: makeCanUseTool(allowedTools || []),
+    canUseTool: makeCanUseTool(allowedTools || [], cwd),
     // Pass clean env without CLAUDECODE
     env: cleanEnv(),
     // Use wrapper to capture stderr

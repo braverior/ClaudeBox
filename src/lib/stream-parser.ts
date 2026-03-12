@@ -53,6 +53,7 @@ export interface StreamMessage {
   questions?: AskUserQuestion[];
   // For exit_plan type
   input?: Record<string, unknown>;
+  planContent?: string;
 }
 
 export interface StreamPayload {
@@ -117,4 +118,6 @@ export interface PendingInteraction {
   questions?: AskUserQuestion[];
   /** For exit_plan: the tool input (allowedPrompts, etc.) */
   input?: Record<string, unknown>;
+  /** For exit_plan: the plan markdown content */
+  planContent?: string;
 }

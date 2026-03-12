@@ -317,6 +317,7 @@ export default function ToolCallCard({ block, result, pendingInteraction, onResp
       tool: string;
       prompt: string;
     }[];
+    const planContent = pendingInteraction?.planContent || "";
     return (
       <div className="rounded-lg border-2 border-accent/50 bg-accent/5 overflow-hidden">
         <div className="px-3 py-2 flex items-center gap-2 bg-accent/10">
@@ -324,6 +325,15 @@ export default function ToolCallCard({ block, result, pendingInteraction, onResp
           <span className="text-sm font-medium text-text-primary">Plan ready — approve to proceed</span>
         </div>
         <div className="px-3 py-3">
+          {/* Plan content preview */}
+          {planContent && (
+            <div className="mb-3">
+              <div className="text-xs text-text-muted mb-1">Plan:</div>
+              <pre className="text-xs bg-code-bg rounded p-3 max-h-64 overflow-y-auto whitespace-pre-wrap text-text-secondary">
+                {planContent}
+              </pre>
+            </div>
+          )}
           {allowedPrompts.length > 0 && (
             <div className="mb-3">
               <div className="text-xs text-text-muted mb-1">Requested permissions:</div>
