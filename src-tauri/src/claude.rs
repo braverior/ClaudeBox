@@ -116,6 +116,16 @@ fn command_with_path(program: &str) -> Command {
     cmd
 }
 
+/// Canonicalize a path and strip the Windows `\\?\` extended-length prefix.
+/// Node.js cannot handle `\\?\C:\...` paths — it misparses `C:` as a directory
+/// and fails with `EISDIR: illegal operation on a directory, lstat 'C:'`.
+fn clean_path(p: std::path::PathBuf) -> String {
+    let resolved = p.canonicalize().unwrap_or(p);
+    let s = resolved.to_string_lossy().to_string();
+    // Strip \\?\ prefix that canonicalize() adds on Windows
+    s.strip_prefix(r"\\?\").unwrap_or(&s).to_string()
+}
+
 /// Resolve the sidecar/bridge.mjs path.
 /// In dev mode, it lives at `{project_root}/sidecar/bridge.mjs`.
 /// In production, it's bundled (bridge.bundle.mjs) as a Tauri resource next to the binary.
@@ -128,7 +138,7 @@ fn resolve_bridge_path() -> Result<String, String> {
         .unwrap_or_default();
     checked.push(format!("cwd: {}", dev_path.display()));
     if dev_path.exists() {
-        return Ok(dev_path.to_string_lossy().to_string());
+        return Ok(clean_path(dev_path));
     }
 
     // 2. Paths relative to the executable
@@ -139,7 +149,7 @@ fn resolve_bridge_path() -> Result<String, String> {
             let dev_from_exe = parent.join("..").join("..").join("..").join("sidecar").join("bridge.mjs");
             checked.push(format!("dev(exe): {}", dev_from_exe.display()));
             if dev_from_exe.exists() {
-                return Ok(dev_from_exe.canonicalize().unwrap_or(dev_from_exe).to_string_lossy().to_string());
+                return Ok(clean_path(dev_from_exe));
             }
 
             // 2b. Production macOS: Binary is in ClaudeBox.app/Contents/MacOS/
@@ -147,7 +157,7 @@ fn resolve_bridge_path() -> Result<String, String> {
             let mac_path = parent.join("..").join("Resources").join("_up_").join("sidecar").join("bridge.bundle.mjs");
             checked.push(format!("macOS: {}", mac_path.display()));
             if mac_path.exists() {
-                return Ok(mac_path.canonicalize().unwrap_or(mac_path).to_string_lossy().to_string());
+                return Ok(clean_path(mac_path));
             }
 
             // 2c. Production Windows / Linux: Tauri places "../sidecar/bridge.bundle.mjs"
@@ -155,14 +165,14 @@ fn resolve_bridge_path() -> Result<String, String> {
             let up_path = parent.join("_up_").join("sidecar").join("bridge.bundle.mjs");
             checked.push(format!("win/linux(_up_): {}", up_path.display()));
             if up_path.exists() {
-                return Ok(up_path.canonicalize().unwrap_or(up_path).to_string_lossy().to_string());
+                return Ok(clean_path(up_path));
             }
 
             // 2d. Flat fallback: bridge.bundle.mjs in the same directory as binary
             let same_dir = parent.join("bridge.bundle.mjs");
             checked.push(format!("flat: {}", same_dir.display()));
             if same_dir.exists() {
-                return Ok(same_dir.to_string_lossy().to_string());
+                return Ok(clean_path(same_dir));
             }
         }
     }
