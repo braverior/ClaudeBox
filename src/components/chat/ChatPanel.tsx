@@ -3,6 +3,7 @@ import { useChatStore } from "../../stores/chatStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { sendMessage, stopSession, onStream, getGitBranch, sendResponse } from "../../lib/claude-ipc";
 import { getCurrentWindow, PhysicalSize } from "@tauri-apps/api/window";
+import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { useT } from "../../lib/i18n";
 import MessageBubble from "./MessageBubble";
 import InputArea from "./InputArea";
@@ -231,8 +232,16 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
         className="flex items-center gap-3 px-4 py-2.5 border-b border-border bg-bg-secondary/50 h-12 flex-shrink-0"
       >
         <FolderOpen size={14} className="text-text-muted pointer-events-none" />
-        <span className="text-sm text-text-secondary truncate pointer-events-none flex-1">
-          {currentSession?.projectPath}
+        <span
+          className="text-sm text-text-secondary truncate flex-1 cursor-pointer hover:text-accent transition-colors"
+          title={currentSession?.projectPath}
+          onClick={() => {
+            if (currentSession?.projectPath) {
+              shellOpen(currentSession.projectPath);
+            }
+          }}
+        >
+          {currentSession?.projectName}
         </span>
         {gitBranch && (
           <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-bg-tertiary text-text-muted pointer-events-none">

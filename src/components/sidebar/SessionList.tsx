@@ -49,7 +49,7 @@ export default function SessionList() {
           >
             <FolderOpen size={14} className="flex-shrink-0 opacity-60" />
             <div className="flex-1 min-w-0">
-              <div className="text-sm truncate">
+              <div className="text-sm truncate" title={session.projectPath}>
                 {session.projectName}
               </div>
               <div className="text-xs text-text-muted mt-0.5">

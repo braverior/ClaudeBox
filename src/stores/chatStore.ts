@@ -88,7 +88,8 @@ function removeMessages(sessionId: string) {
 }
 
 function extractProjectName(path: string): string {
-  const parts = path.replace(/\/+$/, "").split("/");
+  // Handle both Unix "/" and Windows "\" path separators
+  const parts = path.replace(/[\\/]+$/, "").split(/[\\/]/);
   return parts[parts.length - 1] || path;
 }
 

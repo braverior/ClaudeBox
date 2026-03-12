@@ -120,32 +120,57 @@ fn command_with_path(program: &str) -> Command {
 /// In dev mode, it lives at `{project_root}/sidecar/bridge.mjs`.
 /// In production, it's bundled (bridge.bundle.mjs) as a Tauri resource next to the binary.
 fn resolve_bridge_path() -> Result<String, String> {
+    let mut checked: Vec<String> = Vec::new();
+
     // 1. Development: unbundled file relative to CWD (tauri dev runs from project root)
     let dev_path = std::env::current_dir()
-        .map(|p| p.join("sidecar/bridge.mjs"))
+        .map(|p| p.join("sidecar").join("bridge.mjs"))
         .unwrap_or_default();
+    checked.push(format!("cwd: {}", dev_path.display()));
     if dev_path.exists() {
         return Ok(dev_path.to_string_lossy().to_string());
     }
 
-    // 2. Production: bundled file relative to the executable
+    // 2. Paths relative to the executable
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
-            // macOS: Binary is in ClaudeBox.app/Contents/MacOS/
-            // Tauri puts "../sidecar/bridge.bundle.mjs" at Resources/_up_/sidecar/bridge.bundle.mjs
-            let mac_path = parent.join("../Resources/_up_/sidecar/bridge.bundle.mjs");
+            // 2a. Dev fallback: exe is at src-tauri/target/debug/app(.exe),
+            //     project root is three levels up.
+            let dev_from_exe = parent.join("..").join("..").join("..").join("sidecar").join("bridge.mjs");
+            checked.push(format!("dev(exe): {}", dev_from_exe.display()));
+            if dev_from_exe.exists() {
+                return Ok(dev_from_exe.canonicalize().unwrap_or(dev_from_exe).to_string_lossy().to_string());
+            }
+
+            // 2b. Production macOS: Binary is in ClaudeBox.app/Contents/MacOS/
+            //     Tauri puts "../sidecar/bridge.bundle.mjs" at Resources/_up_/sidecar/bridge.bundle.mjs
+            let mac_path = parent.join("..").join("Resources").join("_up_").join("sidecar").join("bridge.bundle.mjs");
+            checked.push(format!("macOS: {}", mac_path.display()));
             if mac_path.exists() {
                 return Ok(mac_path.canonicalize().unwrap_or(mac_path).to_string_lossy().to_string());
             }
-            // Linux / Windows: same directory as binary
+
+            // 2c. Production Windows / Linux: Tauri places "../sidecar/bridge.bundle.mjs"
+            //     resource at {exe_dir}/_up_/sidecar/bridge.bundle.mjs
+            let up_path = parent.join("_up_").join("sidecar").join("bridge.bundle.mjs");
+            checked.push(format!("win/linux(_up_): {}", up_path.display()));
+            if up_path.exists() {
+                return Ok(up_path.canonicalize().unwrap_or(up_path).to_string_lossy().to_string());
+            }
+
+            // 2d. Flat fallback: bridge.bundle.mjs in the same directory as binary
             let same_dir = parent.join("bridge.bundle.mjs");
+            checked.push(format!("flat: {}", same_dir.display()));
             if same_dir.exists() {
                 return Ok(same_dir.to_string_lossy().to_string());
             }
         }
     }
 
-    Err("Cannot find sidecar/bridge.mjs — ensure it exists in the project root or is bundled as a resource".to_string())
+    Err(format!(
+        "Cannot find sidecar/bridge.mjs. Checked paths:\n{}",
+        checked.join("\n")
+    ))
 }
 
 // ── Debug event helper ───────────────────────────────────────────────
