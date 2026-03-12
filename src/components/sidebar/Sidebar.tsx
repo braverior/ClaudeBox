@@ -41,7 +41,7 @@ export default function Sidebar({ onOpenSettings }: SidebarProps) {
 
   if (collapsed) {
     return (
-      <div className="w-[70px] border-r border-border bg-bg-secondary flex flex-col items-center gap-3">
+      <div className="w-[70px] border-r border-border bg-bg-secondary flex flex-col items-center">
         {/* macOS traffic light spacing */}
         <div data-tauri-drag-region className="h-12 w-full flex-shrink-0" />
         <button
@@ -51,6 +51,34 @@ export default function Sidebar({ onOpenSettings }: SidebarProps) {
         >
           <PanelLeft size={18} />
         </button>
+
+        {/* Spacer */}
+        <div className="flex-1" />
+
+        {/* Footer buttons — vertical */}
+        <div className="border-t border-border py-2 flex flex-col items-center gap-1 w-full">
+          <button
+            onClick={toggleLocale}
+            className="p-2 rounded-lg text-text-secondary hover:bg-bg-tertiary/50 hover:text-text-primary transition-colors"
+            title={settings.locale === "en" ? "切换到中文" : "Switch to English"}
+          >
+            <Languages size={16} />
+          </button>
+          <button
+            onClick={toggleTheme}
+            className="p-2 rounded-lg text-text-secondary hover:bg-bg-tertiary/50 hover:text-text-primary transition-colors"
+            title={settings.theme === "dark" ? t("sidebar.lightMode") : t("sidebar.darkMode")}
+          >
+            {settings.theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+          </button>
+          <button
+            onClick={onOpenSettings}
+            className="p-2 rounded-lg text-text-secondary hover:bg-bg-tertiary/50 hover:text-text-primary transition-colors"
+            title={t("sidebar.settings")}
+          >
+            <Settings size={16} />
+          </button>
+        </div>
       </div>
     );
   }
@@ -60,9 +88,9 @@ export default function Sidebar({ onOpenSettings }: SidebarProps) {
       {/* Header — with macOS traffic light inset */}
       <div
         data-tauri-drag-region
-        className="flex items-center justify-between pl-[78px] pr-3 h-12 flex-shrink-0 border-b border-border"
+        className="flex items-center justify-between pl-[78px] pr-3 h-14 flex-shrink-0"
       >
-        <h1 className="text-sm font-bold text-text-primary tracking-wide pointer-events-none">
+        <h1 className="text-sm font-bold text-text-primary tracking-wide pointer-events-none mt-2">
           ClaudeBox
         </h1>
         <button
@@ -75,14 +103,24 @@ export default function Sidebar({ onOpenSettings }: SidebarProps) {
       </div>
 
       {/* Open Project */}
-      <div className="px-2 py-2">
+      <div className="px-2.5 py-2">
         <button
           onClick={handleOpenProject}
-          className="flex items-center gap-2 w-full px-3 py-2.5 rounded-lg
-                     bg-accent/10 text-accent hover:bg-accent/20 transition-colors
+          className="group flex items-center gap-2.5 w-full px-3 py-2.5 rounded-xl
+                     bg-bg-tertiary/25 backdrop-blur-sm
+                     border border-border
+                     text-text-secondary hover:text-text-primary
+                     hover:bg-bg-tertiary/50 hover:border-accent/30
+                     hover:shadow-lg hover:shadow-accent/5
+                     active:scale-[0.98]
+                     transition-all duration-200
                      text-sm font-medium"
         >
-          <FolderOpen size={16} />
+          <div className="flex items-center justify-center w-6 h-6 rounded-lg
+                          bg-accent/10 group-hover:bg-accent/15
+                          transition-colors duration-200">
+            <FolderOpen size={14} className="text-accent/80 group-hover:text-accent transition-colors" />
+          </div>
           <span>{t("sidebar.openProject")}</span>
         </button>
       </div>
