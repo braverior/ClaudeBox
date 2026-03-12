@@ -423,6 +423,11 @@ async function main() {
     env: cleanEnv(),
     // Use wrapper to capture stderr
     pathToClaudeCodeExecutable: wrapper.wrapperPath,
+    // Explicitly set settingSources to avoid the SDK generating an empty
+    // `--setting-sources ""` arg.  On Windows the wrapper uses shell:true,
+    // cmd.exe drops the empty string, and `--permission-mode` gets consumed
+    // as a setting-source value → "Invalid setting source: --permission-mode".
+    settingSources: ["user", "project", "local"],
   };
 
   if (cwd) options.cwd = cwd;
