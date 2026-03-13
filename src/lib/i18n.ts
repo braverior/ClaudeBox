@@ -116,6 +116,15 @@ const en: TranslationDict = {
   "update.ready": "Update v{version} is ready to install",
   "update.restart": "Restart Now",
   "update.later": "Later",
+
+  // Version
+  "version.current": "v{version}",
+  "version.upToDate": "Up to date",
+  "version.newVersion": "v{version} available",
+  "version.downloading": "Downloading v{version}...",
+  "version.readyToInstall": "v{version} ready to install",
+  "version.checkFailed": "Update check failed",
+  "version.restart": "Restart",
 };
 
 const zh: TranslationDict = {
@@ -232,6 +241,15 @@ const zh: TranslationDict = {
   "update.ready": "更新 v{version} 已准备就绪",
   "update.restart": "立即重启",
   "update.later": "稍后",
+
+  // Version
+  "version.current": "v{version}",
+  "version.upToDate": "已是最新版本",
+  "version.newVersion": "v{version} 可更新",
+  "version.downloading": "正在下载 v{version}...",
+  "version.readyToInstall": "v{version} 已准备安装",
+  "version.checkFailed": "检查更新失败",
+  "version.restart": "重启",
 };
 
 const dictionaries: Record<string, TranslationDict> = { en, zh };

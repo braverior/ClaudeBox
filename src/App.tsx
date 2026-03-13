@@ -58,7 +58,11 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-bg-primary">
-      <Sidebar onOpenSettings={() => setSettingsOpen(true)} />
+      <Sidebar
+        onOpenSettings={() => setSettingsOpen(true)}
+        updateStatus={updateStatus}
+        onRestart={applyUpdateAndRelaunch}
+      />
       <ChatPanel claudeAvailable={claudeAvailable} />
 
       {/* Debug panel */}

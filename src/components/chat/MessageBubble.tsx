@@ -9,7 +9,7 @@ import { useT } from "../../lib/i18n";
 import { User, Loader2, Brain, ChevronDown, ChevronRight, Info, FileCode2, FileText, Image, FileType, Terminal, Globe, Settings2, Rocket } from "lucide-react";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import type { ComponentPropsWithoutRef } from "react";
-import appLogo from "../../assets/logo-32.png";
+import claudeAvatar from "../../assets/claude-avatar.svg";
 
 // ── File category styling (shared with InputArea) ──────────────────
 
@@ -295,7 +295,7 @@ export default function MessageBubble({
       <div className="flex justify-start px-4 mb-1.5 mt-1">
         <div className="flex items-start gap-2.5 max-w-[90%] min-w-0">
           <div className="flex-shrink-0 w-7 h-7 rounded-full overflow-hidden flex items-center justify-center mt-0.5">
-            <img src={appLogo} alt="Claude" className="w-7 h-7" />
+            <img src={claudeAvatar} alt="Claude" className="w-7 h-7" />
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-bg-tertiary/40 border border-border/50">
@@ -331,7 +331,7 @@ export default function MessageBubble({
         {/* Avatar or spacer */}
         {showAvatar ? (
           <div className="flex-shrink-0 w-7 h-7 rounded-full overflow-hidden flex items-center justify-center mt-0.5">
-            <img src={appLogo} alt="Claude" className="w-7 h-7" />
+            <img src={claudeAvatar} alt="Claude" className="w-7 h-7" />
           </div>
         ) : (
           <div className="flex-shrink-0 w-7" />

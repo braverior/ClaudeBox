@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Settings,
   PanelLeftClose,
@@ -7,22 +7,58 @@ import {
   Sun,
   Moon,
   Languages,
+  Info,
+  RefreshCw,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { getVersion } from "@tauri-apps/api/app";
 import SessionList from "./SessionList";
 import { useChatStore } from "../../stores/chatStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useT } from "../../lib/i18n";
+import type { UpdateStatus } from "../../lib/updater";
 
 interface SidebarProps {
   onOpenSettings: () => void;
+  updateStatus: UpdateStatus | null;
+  onRestart: () => void;
 }
 
-export default function Sidebar({ onOpenSettings }: SidebarProps) {
+export default function Sidebar({
+  onOpenSettings,
+  updateStatus,
+  onRestart,
+}: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
+  const [versionPopover, setVersionPopover] = useState(false);
+  const [appVersion, setAppVersion] = useState("");
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
   const { settings, updateSettings } = useSettingsStore();
   const { createSession } = useChatStore();
   const t = useT();
+
+  // Get app version on mount
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(() => setAppVersion("unknown"));
+  }, []);
+
+  // Close popover on click outside
+  useEffect(() => {
+    if (!versionPopover) return;
+    const handler = (e: MouseEvent) => {
+      if (
+        popoverRef.current &&
+        !popoverRef.current.contains(e.target as Node) &&
+        buttonRef.current &&
+        !buttonRef.current.contains(e.target as Node)
+      ) {
+        setVersionPopover(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [versionPopover]);
 
   const toggleTheme = () => {
     updateSettings({ theme: settings.theme === "dark" ? "light" : "dark" });
@@ -35,9 +71,108 @@ export default function Sidebar({ onOpenSettings }: SidebarProps) {
   const handleOpenProject = async () => {
     const selected = await open({ directory: true, multiple: false });
     if (selected && typeof selected === "string") {
-      createSession(selected, settings.model || "", settings.permissionMode || "");
+      createSession(
+        selected,
+        settings.model || "",
+        settings.permissionMode || ""
+      );
     }
   };
+
+  // Whether there's actionable update info (green dot indicator)
+  const hasUpdate =
+    updateStatus?.available &&
+    (updateStatus.downloading || updateStatus.downloaded);
+
+  // Build version status line
+  const renderVersionStatus = () => {
+    if (!updateStatus) return null;
+
+    if (updateStatus.error) {
+      return (
+        <span className="text-xs text-text-muted">
+          {t("version.checkFailed")}
+        </span>
+      );
+    }
+
+    if (updateStatus.downloaded && updateStatus.version) {
+      return (
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-success font-medium">
+            {t("version.readyToInstall", { version: updateStatus.version })}
+          </span>
+          <button
+            onClick={() => {
+              setVersionPopover(false);
+              onRestart();
+            }}
+            className="px-2 py-0.5 rounded-md bg-accent text-white text-xs font-medium
+                       hover:bg-accent-hover transition-colors cursor-pointer"
+          >
+            {t("version.restart")}
+          </button>
+        </div>
+      );
+    }
+
+    if (updateStatus.downloading && updateStatus.version) {
+      return (
+        <span className="text-xs text-accent flex items-center gap-1.5">
+          <RefreshCw size={11} className="animate-spin" />
+          {t("version.downloading", { version: updateStatus.version })}
+        </span>
+      );
+    }
+
+    if (updateStatus.available && updateStatus.version) {
+      return (
+        <span className="text-xs text-accent font-medium">
+          {t("version.newVersion", { version: updateStatus.version })}
+        </span>
+      );
+    }
+
+    return (
+      <span className="text-xs text-success">
+        ✓ {t("version.upToDate")}
+      </span>
+    );
+  };
+
+  // Version button (shared between collapsed and expanded)
+  const versionButton = (
+    <button
+      ref={buttonRef}
+      onClick={() => setVersionPopover((v) => !v)}
+      className="relative p-2 rounded-lg text-text-secondary hover:bg-bg-tertiary/50 hover:text-text-primary transition-colors cursor-pointer"
+      title={`v${appVersion}`}
+    >
+      <Info size={16} />
+      {hasUpdate && (
+        <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-success ring-2 ring-bg-secondary" />
+      )}
+    </button>
+  );
+
+  // Version popover content
+  const versionPopoverContent = versionPopover && (
+    <div
+      ref={popoverRef}
+      className="absolute bottom-full left-0 mb-2 ml-1 z-50
+                 bg-bg-secondary border border-border rounded-xl
+                 shadow-2xl shadow-black/20 px-4 py-3 min-w-[200px]
+                 animate-fade-in"
+    >
+      <div className="text-xs font-semibold text-text-primary mb-1.5">
+        ClaudeBox{" "}
+        <span className="font-mono text-text-secondary">
+          {t("version.current", { version: appVersion })}
+        </span>
+      </div>
+      <div className="border-t border-border pt-1.5">{renderVersionStatus()}</div>
+    </div>
+  );
 
   if (collapsed) {
     return (
@@ -56,18 +191,26 @@ export default function Sidebar({ onOpenSettings }: SidebarProps) {
         <div className="flex-1" />
 
         {/* Footer buttons — vertical */}
-        <div className="border-t border-border py-2 flex flex-col items-center gap-1 w-full">
+        <div className="relative border-t border-border py-2 flex flex-col items-center gap-1 w-full">
+          {versionPopoverContent}
+          {versionButton}
           <button
             onClick={toggleLocale}
             className="p-2 rounded-lg text-text-secondary hover:bg-bg-tertiary/50 hover:text-text-primary transition-colors"
-            title={settings.locale === "en" ? "切换到中文" : "Switch to English"}
+            title={
+              settings.locale === "en" ? "切换到中文" : "Switch to English"
+            }
           >
             <Languages size={16} />
           </button>
           <button
             onClick={toggleTheme}
             className="p-2 rounded-lg text-text-secondary hover:bg-bg-tertiary/50 hover:text-text-primary transition-colors"
-            title={settings.theme === "dark" ? t("sidebar.lightMode") : t("sidebar.darkMode")}
+            title={
+              settings.theme === "dark"
+                ? t("sidebar.lightMode")
+                : t("sidebar.darkMode")
+            }
           >
             {settings.theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
           </button>
@@ -116,10 +259,15 @@ export default function Sidebar({ onOpenSettings }: SidebarProps) {
                      transition-all duration-200
                      text-sm font-medium"
         >
-          <div className="flex items-center justify-center w-6 h-6 rounded-lg
+          <div
+            className="flex items-center justify-center w-6 h-6 rounded-lg
                           bg-accent/10 group-hover:bg-accent/15
-                          transition-colors duration-200">
-            <FolderOpen size={14} className="text-accent/80 group-hover:text-accent transition-colors" />
+                          transition-colors duration-200"
+          >
+            <FolderOpen
+              size={14}
+              className="text-accent/80 group-hover:text-accent transition-colors"
+            />
           </div>
           <span>{t("sidebar.openProject")}</span>
         </button>
@@ -129,7 +277,9 @@ export default function Sidebar({ onOpenSettings }: SidebarProps) {
       <SessionList />
 
       {/* Footer */}
-      <div className="border-t border-border px-2 py-2 flex items-center justify-center gap-1">
+      <div className="relative border-t border-border px-2 py-2 flex items-center justify-center gap-1">
+        {versionPopoverContent}
+        {versionButton}
         <button
           onClick={toggleLocale}
           className="p-2 rounded-lg text-text-secondary hover:bg-bg-tertiary/50 hover:text-text-primary transition-colors"
@@ -140,7 +290,11 @@ export default function Sidebar({ onOpenSettings }: SidebarProps) {
         <button
           onClick={toggleTheme}
           className="p-2 rounded-lg text-text-secondary hover:bg-bg-tertiary/50 hover:text-text-primary transition-colors"
-          title={settings.theme === "dark" ? t("sidebar.lightMode") : t("sidebar.darkMode")}
+          title={
+            settings.theme === "dark"
+              ? t("sidebar.lightMode")
+              : t("sidebar.darkMode")
+          }
         >
           {settings.theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
         </button>
