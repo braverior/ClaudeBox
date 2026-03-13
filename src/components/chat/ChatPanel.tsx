@@ -250,11 +250,14 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
 
   return (
     <div className="flex-1 flex flex-col h-full">
-      {/* Session header (also draggable) */}
+      {/* Session header */}
       <div
         data-tauri-drag-region
-        onMouseDown={startWindowDrag}
-        className="flex items-center gap-3 px-4 py-2.5 border-b border-border bg-bg-secondary/50 h-14 flex-shrink-0"
+        className="flex items-center gap-3 px-4 border-b border-border bg-bg-secondary/50 h-14 flex-shrink-0"
+        onMouseDown={(e) => {
+          if ((e.target as HTMLElement).closest("button")) return;
+          getCurrentWindow().startDragging();
+        }}
       >
         <FolderOpen size={14} className="text-text-muted pointer-events-none" />
         <span
@@ -263,8 +266,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
         >
           {currentSession?.projectName}
         </span>
-        {/* Drag spacer — fills remaining space for window dragging */}
-        <div className="flex-1" data-tauri-drag-region />
+        <div className="flex-1 pointer-events-none" />
         {gitBranch && (
           <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-bg-tertiary text-text-muted pointer-events-none max-w-[150px]">
             <GitBranch size={11} className="flex-shrink-0" />

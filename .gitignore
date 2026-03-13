@@ -2,6 +2,7 @@
 node_modules/
 
 cloudflare-worker/
+vercel-updater/
 
 # ── Build output ──────────────────────────────────────────
 dist/

@@ -11,6 +11,7 @@
     "dialog:allow-open",
     "core:window:allow-outer-size",
     "core:window:allow-set-size",
+    "core:window:allow-start-dragging",
     "updater:default",
     "process:default"
   ]

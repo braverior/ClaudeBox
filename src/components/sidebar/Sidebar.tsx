@@ -25,16 +25,19 @@ interface SidebarProps {
   onOpenSettings: () => void;
   updateStatus: UpdateStatus | null;
   onRestart: () => void;
+  onCheckUpdate: () => Promise<void>;
 }
 
 export default function Sidebar({
   onOpenSettings,
   updateStatus,
   onRestart,
+  onCheckUpdate,
 }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [versionPopover, setVersionPopover] = useState(false);
   const [appVersion, setAppVersion] = useState("");
+  const [isChecking, setIsChecking] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const { settings, updateSettings } = useSettingsStore();
@@ -82,10 +85,29 @@ export default function Sidebar({
     }
   };
 
+  // Reset checking state when updateStatus changes (check completed)
+  useEffect(() => {
+    if (isChecking && updateStatus !== null) {
+      setIsChecking(false);
+    }
+  }, [updateStatus]);
+
+  const handleCheckUpdate = async () => {
+    setIsChecking(true);
+    try {
+      await onCheckUpdate();
+    } catch {
+      setIsChecking(false);
+    }
+  };
+
   // Whether there's actionable update info (green dot indicator)
   const hasUpdate =
     updateStatus?.available &&
     (updateStatus.downloading || updateStatus.downloaded);
+
+  // Whether update check failed (yellow warning indicator)
+  const hasUpdateError = !!updateStatus?.error;
 
   // Build version status line
   const renderVersionStatus = () => {
@@ -93,9 +115,14 @@ export default function Sidebar({
 
     if (updateStatus.error) {
       return (
-        <span className="text-xs text-text-muted">
-          {t("version.checkFailed")}
-        </span>
+        <div className="space-y-0.5">
+          <span className="text-xs text-red-400">
+            {t("version.checkFailed")}
+          </span>
+          <p className="text-[10px] text-text-muted break-all line-clamp-2" title={updateStatus.error}>
+            {updateStatus.error}
+          </p>
+        </div>
       );
     }
 
@@ -155,6 +182,9 @@ export default function Sidebar({
       {hasUpdate && (
         <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-success ring-2 ring-bg-secondary" />
       )}
+      {!hasUpdate && hasUpdateError && (
+        <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-yellow-500 ring-2 ring-bg-secondary" />
+      )}
     </button>
   );
 
@@ -174,6 +204,21 @@ export default function Sidebar({
         </span>
       </div>
       <div className="border-t border-border pt-1.5">{renderVersionStatus()}</div>
+      {/* Check for Updates button — hide when downloading or downloaded */}
+      {!updateStatus?.downloading && !updateStatus?.downloaded && (
+        <button
+          onClick={handleCheckUpdate}
+          disabled={isChecking}
+          className="mt-2 w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg
+                     text-xs font-medium text-text-secondary
+                     bg-bg-tertiary/40 hover:bg-bg-tertiary/70 hover:text-text-primary
+                     disabled:opacity-50 disabled:cursor-not-allowed
+                     transition-colors cursor-pointer"
+        >
+          <RefreshCw size={11} className={isChecking ? "animate-spin" : ""} />
+          {isChecking ? t("version.checking") : t("version.checkUpdate")}
+        </button>
+      )}
     </div>
   );
 

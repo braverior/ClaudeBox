@@ -80,6 +80,7 @@ export default function App() {
         onOpenSettings={() => setSettingsOpen(true)}
         updateStatus={updateStatus}
         onRestart={applyUpdateAndRelaunch}
+        onCheckUpdate={() => checkAndDownloadUpdate(setUpdateStatus)}
       />
       <ChatPanel claudeAvailable={claudeAvailable} />
 

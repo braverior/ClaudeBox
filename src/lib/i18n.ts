@@ -15,6 +15,7 @@ const en: TranslationDict = {
   "session.empty": "No sessions yet.",
   "session.emptyHint": "Open a project to start!",
   "session.delete": "Delete session",
+  "session.openFolder": "Open in Finder",
 
   // ChatPanel — welcome
   "welcome.title": "Welcome to ClaudeBox",
@@ -41,7 +42,7 @@ const en: TranslationDict = {
   "input.attachFiles": "Attach Files",
   "chat.launching": "Claude is starting...",
   "chat.launched": "Claude started",
-  "chat.resumeFrom": "Resume:",
+  "chat.resumeFrom": "Session resumed",
   "chat.clearSession": "New session",
   "chat.clearSessionConfirm": "Clear session memory? The next message will start a fresh conversation without previous context.",
   "chat.sessionCleared": "Session memory cleared. Next message will start fresh.",
@@ -129,6 +130,8 @@ const en: TranslationDict = {
   "version.readyToInstall": "v{version} ready to install",
   "version.checkFailed": "Update check failed",
   "version.restart": "Restart",
+  "version.checkUpdate": "Check for Updates",
+  "version.checking": "Checking...",
 };
 
 const zh: TranslationDict = {
@@ -144,6 +147,7 @@ const zh: TranslationDict = {
   "session.empty": "暂无会话",
   "session.emptyHint": "打开一个项目开始吧！",
   "session.delete": "删除会话",
+  "session.openFolder": "打开文件夹",
 
   // ChatPanel — welcome
   "welcome.title": "欢迎使用 ClaudeBox",
@@ -170,7 +174,7 @@ const zh: TranslationDict = {
   "input.attachFiles": "添加附件",
   "chat.launching": "Claude 启动中...",
   "chat.launched": "Claude 已启动",
-  "chat.resumeFrom": "恢复自：",
+  "chat.resumeFrom": "会话已恢复",
   "chat.clearSession": "新会话",
   "chat.clearSessionConfirm": "清除会话记忆？下次发送消息将开启全新对话，不保留之前的上下文。",
   "chat.sessionCleared": "会话记忆已清除，下次发送消息将开启全新对话。",
@@ -258,6 +262,8 @@ const zh: TranslationDict = {
   "version.readyToInstall": "v{version} 已准备安装",
   "version.checkFailed": "检查更新失败",
   "version.restart": "重启",
+  "version.checkUpdate": "检查更新",
+  "version.checking": "检查中...",
 };
 
 const dictionaries: Record<string, TranslationDict> = { en, zh };

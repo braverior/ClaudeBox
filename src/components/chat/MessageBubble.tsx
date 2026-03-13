@@ -6,10 +6,9 @@ import CodeBlock from "./CodeBlock";
 import ToolCallCard from "./ToolCallCard";
 import { formatTimeWithSeconds, formatDuration } from "../../lib/utils";
 import { useT } from "../../lib/i18n";
-import { User, Loader2, Brain, ChevronDown, ChevronRight, Info, FileCode2, FileText, Image, FileType, Terminal, Globe, Settings2, Rocket } from "lucide-react";
+import { User, Loader2, Brain, ChevronDown, ChevronRight, Info, FileCode2, FileText, Image, FileType, Terminal, Globe, Settings2, Rocket, Sparkles } from "lucide-react";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import type { ComponentPropsWithoutRef } from "react";
-import claudeAvatar from "../../assets/claude-avatar.svg";
 
 // ── File category styling (shared with InputArea) ──────────────────
 
@@ -256,8 +255,8 @@ export default function MessageBubble({
               </p>
             </div>
           </div>
-          <div className="flex-shrink-0 w-7 h-7 rounded-full bg-accent/20 flex items-center justify-center mt-0.5">
-            <User size={14} className="text-accent" />
+          <div className="flex-shrink-0 w-7 h-7 rounded-lg bg-blue-500/15 flex items-center justify-center mt-0.5">
+            <User size={14} className="text-blue-400" />
           </div>
         </div>
       </div>
@@ -294,8 +293,8 @@ export default function MessageBubble({
     return (
       <div className="flex justify-start px-4 mb-1.5 mt-1">
         <div className="flex items-start gap-2.5 max-w-[90%] min-w-0">
-          <div className="flex-shrink-0 w-7 h-7 rounded-full overflow-hidden flex items-center justify-center mt-0.5">
-            <img src={claudeAvatar} alt="Claude" className="w-7 h-7" />
+          <div className="flex-shrink-0 w-7 h-7 rounded-lg bg-accent/10 flex items-center justify-center mt-0.5">
+            <Sparkles size={14} className="text-accent" />
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-bg-tertiary/40 border border-border/50">
@@ -313,13 +312,8 @@ export default function MessageBubble({
                   </span>
                 )}
                 {info.resumeFrom && (
-                  <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 text-[10px] font-mono truncate max-w-[220px]">
-                    {t("chat.resumeFrom")} {info.resumeFrom}
-                  </span>
-                )}
-                {info.sessionId && !info.resumeFrom && (
-                  <span className="px-1.5 py-0.5 rounded bg-bg-tertiary text-text-muted text-[10px] font-mono truncate max-w-[180px]">
-                    {info.sessionId}
+                  <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 text-[10px] font-mono">
+                    {t("chat.resumeFrom")}
                   </span>
                 )}
               </div>
@@ -335,8 +329,8 @@ export default function MessageBubble({
       <div className="flex items-start gap-2.5 max-w-[90%] min-w-0">
         {/* Avatar or spacer */}
         {showAvatar ? (
-          <div className="flex-shrink-0 w-7 h-7 rounded-full overflow-hidden flex items-center justify-center mt-0.5">
-            <img src={claudeAvatar} alt="Claude" className="w-7 h-7" />
+          <div className="flex-shrink-0 w-7 h-7 rounded-lg bg-accent/10 flex items-center justify-center mt-0.5">
+            <Sparkles size={14} className="text-accent" />
           </div>
         ) : (
           <div className="flex-shrink-0 w-7" />

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Bug, X, Trash2 } from "lucide-react";
-import { onDebug } from "../../lib/claude-ipc";
+import { onDebug, onAppDebug } from "../../lib/claude-ipc";
 import { useT } from "../../lib/i18n";
 import type { DebugEvent } from "../../lib/stream-parser";
 
@@ -37,6 +37,7 @@ export default function DebugPanel({ visible, onClose }: DebugPanelProps) {
   const t = useT();
 
   useEffect(() => {
+    // Listen for Rust-emitted debug events
     const unlisten = onDebug((event) => {
       setLogs((prev) => {
         const next = [...prev, event];
@@ -45,8 +46,20 @@ export default function DebugPanel({ visible, onClose }: DebugPanelProps) {
         return next;
       });
     });
+
+    // Listen for frontend-emitted debug events (updater, etc.)
+    const addLog = (event: DebugEvent) => {
+      setLogs((prev) => {
+        const next = [...prev, event];
+        if (next.length > 1000) next.splice(0, next.length - 1000);
+        return next;
+      });
+    };
+    const unsubApp = onAppDebug(addLog);
+
     return () => {
       unlisten.then((fn) => fn());
+      unsubApp();
     };
   }, []);
 

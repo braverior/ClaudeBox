@@ -98,3 +98,34 @@ export async function readFile(path: string): Promise<string> {
 export async function readImageBase64(path: string): Promise<string> {
   return invoke("read_image_base64", { path });
 }
+
+/**
+ * Frontend-side debug event bus.
+ * Used by modules like updater to emit logs visible in the Debug Panel.
+ */
+type AppDebugListener = (event: DebugEvent) => void;
+const appDebugListeners = new Set<AppDebugListener>();
+
+/** Subscribe to frontend-emitted debug events. Returns unsubscribe fn. */
+export function onAppDebug(fn: AppDebugListener): () => void {
+  appDebugListeners.add(fn);
+  return () => { appDebugListeners.delete(fn); };
+}
+
+/**
+ * Emit a debug event from the frontend side.
+ * Shows up in the Debug Panel alongside Rust-emitted events.
+ */
+export function emitDebug(
+  level: DebugEvent["level"],
+  message: string,
+  sessionId = "__app__"
+): void {
+  const event: DebugEvent = {
+    session_id: sessionId,
+    level,
+    message,
+    timestamp: Date.now(),
+  };
+  for (const fn of appDebugListeners) fn(event);
+}

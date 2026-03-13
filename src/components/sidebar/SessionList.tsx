@@ -1,8 +1,17 @@
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useChatStore } from "../../stores/chatStore";
 import { stopSession } from "../../lib/claude-ipc";
 import { formatRelativeDate } from "../../lib/utils";
 import { FolderOpen, Trash2 } from "lucide-react";
+import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { useT } from "../../lib/i18n";
+
+interface ContextMenu {
+  x: number;
+  y: number;
+  sessionId: string;
+  projectPath: string;
+}
 
 export default function SessionList() {
   const {
@@ -13,6 +22,54 @@ export default function SessionList() {
     removeSession,
   } = useChatStore();
   const t = useT();
+  const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close context menu on click outside or Escape
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handleClick = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setContextMenu(null);
+      }
+    };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setContextMenu(null);
+    };
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [contextMenu]);
+
+  const handleContextMenu = useCallback(
+    (e: React.MouseEvent, sessionId: string, projectPath: string) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setContextMenu({ x: e.clientX, y: e.clientY, sessionId, projectPath });
+    },
+    []
+  );
+
+  const handleDelete = useCallback(
+    async (sessionId: string) => {
+      setContextMenu(null);
+      try {
+        await stopSession(sessionId);
+      } catch {
+        // ignore
+      }
+      removeSession(sessionId);
+    },
+    [removeSession]
+  );
+
+  const handleOpenFolder = useCallback((projectPath: string) => {
+    setContextMenu(null);
+    shellOpen(projectPath);
+  }, []);
 
   if (sessions.length === 0) {
     return (
@@ -24,16 +81,6 @@ export default function SessionList() {
     );
   }
 
-  const handleDelete = async (e: React.MouseEvent, sessionId: string) => {
-    e.stopPropagation();
-    try {
-      await stopSession(sessionId);
-    } catch {
-      // ignore
-    }
-    removeSession(sessionId);
-  };
-
   return (
     <div className="flex-1 overflow-y-auto px-2 py-1">
       {sessions.map((session) => {
@@ -43,6 +90,9 @@ export default function SessionList() {
           <div
             key={session.id}
             onClick={() => switchSession(session.id)}
+            onContextMenu={(e) =>
+              handleContextMenu(e, session.id, session.projectPath)
+            }
             className={`group flex items-center gap-2 px-3 py-2.5 rounded-lg mb-0.5 cursor-pointer transition-colors ${
               isActive
                 ? "bg-bg-tertiary/50 text-text-primary"
@@ -64,7 +114,10 @@ export default function SessionList() {
               </div>
             </div>
             <button
-              onClick={(e) => handleDelete(e, session.id)}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDelete(session.id);
+              }}
               className="flex-shrink-0 opacity-0 group-hover:opacity-100 p-1 hover:text-error transition-all"
               title={t("session.delete")}
             >
@@ -73,6 +126,31 @@ export default function SessionList() {
           </div>
         );
       })}
+
+      {/* Context menu */}
+      {contextMenu && (
+        <div
+          ref={menuRef}
+          className="fixed z-50 min-w-[160px] py-1 rounded-lg bg-bg-secondary border border-border shadow-xl shadow-black/20 animate-fade-in"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+        >
+          <button
+            onClick={() => handleOpenFolder(contextMenu.projectPath)}
+            className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-text-secondary hover:bg-bg-tertiary/50 hover:text-text-primary transition-colors"
+          >
+            <FolderOpen size={14} />
+            {t("session.openFolder")}
+          </button>
+          <div className="my-1 border-t border-border" />
+          <button
+            onClick={() => handleDelete(contextMenu.sessionId)}
+            className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-error/80 hover:bg-error/10 hover:text-error transition-colors"
+          >
+            <Trash2 size={14} />
+            {t("session.delete")}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
