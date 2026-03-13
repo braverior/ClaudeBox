@@ -671,3 +671,42 @@ pub fn read_image_base64(path: String) -> Result<String, String> {
     let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
     Ok(format!("data:{};base64,{}", mime, b64))
 }
+
+// ── Persistent file storage ──────────────────────────────────────────
+// Stores data in ~/.claudebox/data/ — stable across app updates,
+// independent of Tauri WebView's localStorage (which has ~5MB limit
+// and may be lost when the bundle identifier changes).
+
+fn storage_dir() -> std::path::PathBuf {
+    #[cfg(unix)]
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    #[cfg(windows)]
+    let home = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\".to_string());
+    std::path::PathBuf::from(home).join(".claudebox").join("data")
+}
+
+#[tauri::command]
+pub fn storage_read(key: String) -> Result<Option<String>, String> {
+    let path = storage_dir().join(format!("{}.json", key));
+    if !path.exists() {
+        return Ok(None);
+    }
+    std::fs::read_to_string(&path).map(Some).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn storage_write(key: String, value: String) -> Result<(), String> {
+    let dir = storage_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(format!("{}.json", key));
+    std::fs::write(&path, value).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn storage_remove(key: String) -> Result<(), String> {
+    let path = storage_dir().join(format!("{}.json", key));
+    if path.exists() {
+        std::fs::remove_file(&path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}

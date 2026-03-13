@@ -7,6 +7,7 @@ import type {
 } from "../lib/stream-parser";
 import { useTaskStore } from "./taskStore";
 import { v4Style } from "../lib/utils";
+import { storageRead, storageWrite, storageRemove } from "../lib/storage";
 
 export interface Session {
   id: string;
@@ -32,7 +33,11 @@ interface ChatState {
   streamError: string | null;
   /** Pending interactive tool request (AskUserQuestion / ExitPlanMode) */
   pendingInteraction: PendingInteraction | null;
+  /** Whether the store has finished loading from persistent storage */
+  loaded: boolean;
 
+  /** Async initialization — loads data from file storage, migrates from localStorage */
+  init: () => Promise<void>;
   createSession: (projectPath: string, model: string, permissionMode: string) => string;
   removeSession: (id: string) => void;
   switchSession: (id: string) => void;
@@ -44,20 +49,27 @@ interface ChatState {
   handleStreamDone: (sessionId: string, error?: string) => void;
   setStreaming: (sessionId: string, streaming: boolean) => void;
   clearError: () => void;
-  loadSessions: () => void;
   /** Clear the pending interaction after it has been responded to */
   clearPendingInteraction: () => void;
 }
 
-const SESSIONS_KEY = "claudebox-sessions";
-const MESSAGES_KEY_PREFIX = "claudebox-msgs-";
+// ── File storage keys ───────────────────────────────────────────────
 
-function loadSessions(): Session[] {
+const SESSIONS_KEY = "sessions";
+const MESSAGES_KEY_PREFIX = "msgs-";
+
+// ── Legacy localStorage keys (for migration) ───────────────────────
+
+const LS_SESSIONS_KEY = "claudebox-sessions";
+const LS_MESSAGES_KEY_PREFIX = "claudebox-msgs-";
+
+// ── File storage helpers ────────────────────────────────────────────
+
+async function loadSessionsFromFile(): Promise<Session[]> {
   try {
-    const stored = localStorage.getItem(SESSIONS_KEY);
-    if (stored) {
-      const sessions: Session[] = JSON.parse(stored);
-      // Migrate old sessions: add default allowedTools if missing
+    const data = await storageRead(SESSIONS_KEY);
+    if (data) {
+      const sessions: Session[] = JSON.parse(data);
       return sessions.map((s) => ({
         ...s,
         allowedTools: s.allowedTools ?? DEFAULT_TOOLS,
@@ -68,32 +80,66 @@ function loadSessions(): Session[] {
 }
 
 function saveSessions(sessions: Session[]) {
-  localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+  storageWrite(SESSIONS_KEY, JSON.stringify(sessions)).catch(() => {});
 }
 
-function loadMessages(sessionId: string): ChatMessage[] {
+async function loadMessagesFromFile(sessionId: string): Promise<ChatMessage[]> {
   try {
-    const stored = localStorage.getItem(MESSAGES_KEY_PREFIX + sessionId);
-    if (stored) return JSON.parse(stored);
+    const data = await storageRead(MESSAGES_KEY_PREFIX + sessionId);
+    if (data) return JSON.parse(data);
   } catch { /* ignore */ }
   return [];
 }
 
 function saveMessages(sessionId: string, msgs: ChatMessage[]) {
-  try {
-    localStorage.setItem(MESSAGES_KEY_PREFIX + sessionId, JSON.stringify(msgs));
-  } catch { /* ignore — may exceed quota */ }
+  storageWrite(MESSAGES_KEY_PREFIX + sessionId, JSON.stringify(msgs)).catch(() => {});
 }
 
 function removeMessages(sessionId: string) {
-  localStorage.removeItem(MESSAGES_KEY_PREFIX + sessionId);
+  storageRemove(MESSAGES_KEY_PREFIX + sessionId).catch(() => {});
 }
 
+// ── Legacy localStorage helpers (for migration) ────────────────────
+
+function loadSessionsFromLocalStorage(): Session[] {
+  try {
+    const stored = localStorage.getItem(LS_SESSIONS_KEY);
+    if (stored) {
+      const sessions: Session[] = JSON.parse(stored);
+      return sessions.map((s) => ({
+        ...s,
+        allowedTools: s.allowedTools ?? DEFAULT_TOOLS,
+      }));
+    }
+  } catch { /* ignore */ }
+  return [];
+}
+
+function loadMessagesFromLocalStorage(sessionId: string): ChatMessage[] {
+  try {
+    const stored = localStorage.getItem(LS_MESSAGES_KEY_PREFIX + sessionId);
+    if (stored) return JSON.parse(stored);
+  } catch { /* ignore */ }
+  return [];
+}
+
+function clearLocalStorageData(sessions: Session[]) {
+  try {
+    localStorage.removeItem(LS_SESSIONS_KEY);
+    for (const s of sessions) {
+      localStorage.removeItem(LS_MESSAGES_KEY_PREFIX + s.id);
+    }
+  } catch { /* ignore */ }
+}
+
+// ── Project name extraction ─────────────────────────────────────────
+
 function extractProjectName(path: string): string {
-  // Handle both Unix "/" and Windows "\" path separators
   const parts = path.replace(/[\\/]+$/, "").split(/[\\/]/);
   return parts[parts.length - 1] || path;
 }
+
+// ── Task tool call processing ───────────────────────────────────────
 
 function processTaskToolCalls(sessionId: string, content: ContentBlock[]) {
   const taskStore = useTaskStore.getState();
@@ -126,15 +172,12 @@ function appendNewBlocks(
 
   const result = [...existing];
   for (const block of incoming) {
-    // If block has an id and we already have it, skip (or update)
     if (block.id && existingIds.has(block.id)) {
-      // Update existing block in place (e.g. tool_use input may have grown)
       const idx = result.findIndex((b) => b.id === block.id);
       if (idx >= 0) result[idx] = block;
       continue;
     }
 
-    // For text blocks with same type as the last existing block, update (streaming text)
     const last = result[result.length - 1];
     if (
       block.type === "text" &&
@@ -153,29 +196,63 @@ function appendNewBlocks(
   return result;
 }
 
-const initialSessions = loadSessions();
-// Pre-load messages for the most recent session so they show on startup
-const initialMessages: Record<string, ChatMessage[]> = {};
-if (initialSessions.length > 0) {
-  const msgs = loadMessages(initialSessions[0].id);
-  if (msgs.length > 0) {
-    initialMessages[initialSessions[0].id] = msgs;
-  }
-}
+// ── Store ───────────────────────────────────────────────────────────
 
 export const useChatStore = create<ChatState>((set, get) => ({
-  sessions: initialSessions,
-  // Auto-restore the most recent session
-  currentSessionId: initialSessions.length > 0 ? initialSessions[0].id : null,
-  messages: initialMessages,
+  sessions: [],
+  currentSessionId: null,
+  messages: {},
   stderrLogs: {},
   streamStartTimes: {},
   streamingSessions: {},
   streamError: null,
   pendingInteraction: null,
+  loaded: false,
+
+  init: async () => {
+    // 1. Try loading from file storage
+    let sessions = await loadSessionsFromFile();
+
+    // 2. If empty, migrate from localStorage
+    if (sessions.length === 0) {
+      const lsSessions = loadSessionsFromLocalStorage();
+      if (lsSessions.length > 0) {
+        sessions = lsSessions;
+        // Save sessions to file storage
+        await storageWrite(SESSIONS_KEY, JSON.stringify(sessions)).catch(() => {});
+        // Migrate messages for all sessions
+        for (const s of sessions) {
+          const msgs = loadMessagesFromLocalStorage(s.id);
+          if (msgs.length > 0) {
+            await storageWrite(
+              MESSAGES_KEY_PREFIX + s.id,
+              JSON.stringify(msgs)
+            ).catch(() => {});
+          }
+        }
+        // Clean up localStorage after successful migration
+        clearLocalStorageData(sessions);
+      }
+    }
+
+    // 3. Load messages for the most recent session
+    const messages: Record<string, ChatMessage[]> = {};
+    if (sessions.length > 0) {
+      const msgs = await loadMessagesFromFile(sessions[0].id);
+      if (msgs.length > 0) {
+        messages[sessions[0].id] = msgs;
+      }
+    }
+
+    set({
+      sessions,
+      currentSessionId: sessions.length > 0 ? sessions[0].id : null,
+      messages,
+      loaded: true,
+    });
+  },
 
   createSession: (projectPath, model, permissionMode) => {
-    // If a session with this path already exists, switch to it
     const existing = get().sessions.find((s) => s.projectPath === projectPath);
     if (existing) {
       set({ currentSessionId: existing.id, streamError: null });
@@ -221,18 +298,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   switchSession: (id) => {
-    // Load persisted messages if not already in memory
     const currentMsgs = get().messages[id];
     if (!currentMsgs) {
-      const loaded = loadMessages(id);
-      if (loaded.length > 0) {
-        set({
-          currentSessionId: id,
-          streamError: null,
-          messages: { ...get().messages, [id]: loaded },
-        });
-        return;
-      }
+      // Load messages from file storage asynchronously
+      loadMessagesFromFile(id).then((loaded) => {
+        if (loaded.length > 0) {
+          set({
+            messages: { ...get().messages, [id]: loaded },
+          });
+        }
+      });
     }
     set({ currentSessionId: id, streamError: null });
   },
@@ -254,7 +329,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
       attachments,
     };
     const msgs = [...(get().messages[sessionId] || []), msg];
-    // Clear task list for a fresh interaction
     useTaskStore.getState().clearTasks(sessionId);
     set({
       messages: { ...get().messages, [sessionId]: msgs },
@@ -298,7 +372,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const event: StreamMessage = JSON.parse(data);
       const msgs = [...(get().messages[sessionId] || [])];
 
-      // Helper: finalize the launch placeholder when real content arrives
       const finalizeLaunch = () => {
         const launchIdx = msgs.findIndex(
           (m) => m.role === "assistant" && m.streamMessageId === "__launch__"
@@ -309,7 +382,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
       };
 
       if (event.type === "system") {
-        // Any system event finalizes the launch message
         const launchIdx = msgs.findIndex(
           (m) => m.role === "assistant" && m.streamMessageId === "__launch__"
         );
@@ -336,13 +408,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const incomingContent: ContentBlock[] = event.message.content || [];
         const streamMsgId = event.message.id;
 
-        // Finalize launch placeholder when first real assistant content arrives
         finalizeLaunch();
-
-        // Process task tool calls
         processTaskToolCalls(sessionId, incomingContent);
 
-        // Find existing assistant message with the same stream message id
         const existingIdx = streamMsgId
           ? msgs.findIndex(
               (m) =>
@@ -352,7 +420,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
           : -1;
 
         if (existingIdx >= 0) {
-          // Same turn — append new content blocks
           const existing = msgs[existingIdx];
           msgs[existingIdx] = {
             ...existing,
@@ -366,7 +433,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
               : existing.usage,
           };
         } else {
-          // New turn — create a new assistant message
           msgs.push({
             id: streamMsgId || v4Style(),
             streamMessageId: streamMsgId,
@@ -384,12 +450,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
           });
         }
       } else if (event.type === "user" && event.message) {
-        // Tool result messages — inject results into the matching assistant message
         const incomingContent: ContentBlock[] = event.message.content || [];
 
         for (const block of incomingContent) {
           if (block.type === "tool_result" && block.tool_use_id) {
-            // Find the assistant message that contains the matching tool_use
             for (let i = msgs.length - 1; i >= 0; i--) {
               const msg = msgs[i];
               if (msg.role !== "assistant") continue;
@@ -397,7 +461,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 (b) => b.type === "tool_use" && b.id === block.tool_use_id
               );
               if (hasToolUse) {
-                // Append tool_result block to that assistant message
                 msgs[i] = {
                   ...msg,
                   content: [...msg.content, block],
@@ -408,7 +471,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
         }
       } else if (event.type === "result") {
-        // Calculate turn tokens and duration, store on the last assistant message
         const startTime = get().streamStartTimes[sessionId];
         let turnTokens = 0;
         let lastAssistantIdx = -1;
@@ -434,7 +496,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
             },
           };
         }
-        // Mark all streaming messages as done
         for (let i = 0; i < msgs.length; i++) {
           if (msgs[i].isStreaming) {
             msgs[i] = { ...msgs[i], isStreaming: false };
@@ -442,7 +503,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
         set({ streamingSessions: { ...get().streamingSessions, [sessionId]: false }, pendingInteraction: null });
       } else if (event.type === "ask_user" && event.requestId) {
-        // Interactive: Claude is asking the user a question
         set({
           pendingInteraction: {
             type: "ask_user",
@@ -451,7 +511,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
           },
         });
       } else if (event.type === "exit_plan" && event.requestId) {
-        // Interactive: Claude wants to exit plan mode — user must approve
         set({
           pendingInteraction: {
             type: "exit_plan",
@@ -461,7 +520,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
           },
         });
       } else if (event.type === "error") {
-        // Sidecar error — parse the raw data for the message field
         try {
           const raw = JSON.parse(data);
           set({ streamError: raw.message || "Unknown sidecar error" });
@@ -487,7 +545,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       s.id === sessionId ? { ...s, updatedAt: Date.now() } : s
     );
     saveSessions(sessions);
-    // Persist messages to localStorage
+    // Persist messages to file storage
     saveMessages(sessionId, msgs);
     set({
       sessions,
@@ -501,6 +559,5 @@ export const useChatStore = create<ChatState>((set, get) => ({
     streamingSessions: { ...get().streamingSessions, [sessionId]: streaming },
   }),
   clearError: () => set({ streamError: null }),
-  loadSessions: () => set({ sessions: loadSessions() }),
   clearPendingInteraction: () => set({ pendingInteraction: null }),
 }));

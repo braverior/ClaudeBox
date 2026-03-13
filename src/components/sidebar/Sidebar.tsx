@@ -9,7 +9,9 @@ import {
   Languages,
   Info,
   RefreshCw,
+  Github,
 } from "lucide-react";
+import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getVersion } from "@tauri-apps/api/app";
 import SessionList from "./SessionList";
@@ -195,6 +197,13 @@ export default function Sidebar({
           {versionPopoverContent}
           {versionButton}
           <button
+            onClick={() => shellOpen("https://github.com/braverior/ClaudeBox/releases/")}
+            className="p-2 rounded-lg text-text-secondary hover:bg-bg-tertiary/50 hover:text-text-primary transition-colors"
+            title="GitHub"
+          >
+            <Github size={16} />
+          </button>
+          <button
             onClick={toggleLocale}
             className="p-2 rounded-lg text-text-secondary hover:bg-bg-tertiary/50 hover:text-text-primary transition-colors"
             title={
@@ -280,6 +289,13 @@ export default function Sidebar({
       <div className="relative border-t border-border px-2 py-2 flex items-center justify-center gap-1">
         {versionPopoverContent}
         {versionButton}
+        <button
+          onClick={() => shellOpen("https://github.com/braverior/ClaudeBox/releases/")}
+          className="p-2 rounded-lg text-text-secondary hover:bg-bg-tertiary/50 hover:text-text-primary transition-colors"
+          title="GitHub"
+        >
+          <Github size={16} />
+        </button>
         <button
           onClick={toggleLocale}
           className="p-2 rounded-lg text-text-secondary hover:bg-bg-tertiary/50 hover:text-text-primary transition-colors"

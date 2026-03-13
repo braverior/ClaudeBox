@@ -11,6 +11,8 @@ import {
   type UpdateStatus,
 } from "./lib/updater";
 import { useSettingsStore } from "./stores/settingsStore";
+import { useChatStore } from "./stores/chatStore";
+import { Loader2 } from "lucide-react";
 
 export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -18,7 +20,13 @@ export default function App() {
   const [claudeAvailable, setClaudeAvailable] = useState(true);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [updateDismissed, setUpdateDismissed] = useState(false);
-  const { settings } = useSettingsStore();
+  const { settings, loaded: settingsLoaded, init: initSettings } = useSettingsStore();
+  const { loaded: chatLoaded, init: initChat } = useChatStore();
+
+  // Initialize stores from file storage on mount
+  useEffect(() => {
+    Promise.all([initSettings(), initChat()]).catch(console.error);
+  }, []);
 
   // Apply theme class to root element
   useEffect(() => {
@@ -31,13 +39,14 @@ export default function App() {
   }, [settings.theme]);
 
   useEffect(() => {
+    if (!settingsLoaded) return;
     checkClaudeInstalled(settings.claudePath || undefined)
       .then(() => setClaudeAvailable(true))
       .catch(() => {
         setClaudeAvailable(false);
         setSettingsOpen(true);
       });
-  }, []);
+  }, [settingsLoaded]);
 
   // Keyboard shortcut: Ctrl/Cmd+Shift+D to toggle debug
   useEffect(() => {
@@ -55,6 +64,15 @@ export default function App() {
   useEffect(() => {
     checkAndDownloadUpdate(setUpdateStatus);
   }, []);
+
+  // Show loading screen until stores are ready
+  if (!settingsLoaded || !chatLoaded) {
+    return (
+      <div className="flex h-screen bg-bg-primary items-center justify-center">
+        <Loader2 size={32} className="animate-spin text-accent" />
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen bg-bg-primary">

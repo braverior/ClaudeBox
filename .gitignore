@@ -1,6 +1,8 @@
 # ── Dependencies ──────────────────────────────────────────
 node_modules/
 
+cloudflare-worker/
+
 # ── Build output ──────────────────────────────────────────
 dist/
 sidecar/bridge.bundle.mjs

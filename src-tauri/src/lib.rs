@@ -30,6 +30,9 @@ pub fn run() {
             claude::list_dir,
             claude::read_file,
             claude::read_image_base64,
+            claude::storage_read,
+            claude::storage_write,
+            claude::storage_remove,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { storageRead, storageWrite } from "../lib/storage";
 
 export interface Settings {
   model: string;
@@ -14,11 +15,13 @@ export interface Settings {
 
 interface SettingsState {
   settings: Settings;
+  loaded: boolean;
+  init: () => Promise<void>;
   updateSettings: (partial: Partial<Settings>) => void;
-  loadSettings: () => void;
 }
 
-const STORAGE_KEY = "claudebox-settings";
+const STORAGE_KEY = "settings";
+const LS_STORAGE_KEY = "claudebox-settings";
 
 const defaultSettings: Settings = {
   model: "",
@@ -32,28 +35,41 @@ const defaultSettings: Settings = {
   baseUrl: "",
 };
 
-function loadFromStorage(): Settings {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      return { ...defaultSettings, ...JSON.parse(stored) };
-    }
-  } catch {
-    // ignore
-  }
-  return defaultSettings;
-}
-
 export const useSettingsStore = create<SettingsState>((set, get) => ({
-  settings: loadFromStorage(),
+  settings: defaultSettings,
+  loaded: false,
+
+  init: async () => {
+    // 1. Try loading from file storage
+    try {
+      const data = await storageRead(STORAGE_KEY);
+      if (data) {
+        set({ settings: { ...defaultSettings, ...JSON.parse(data) }, loaded: true });
+        return;
+      }
+    } catch { /* ignore */ }
+
+    // 2. Migrate from localStorage
+    try {
+      const lsData = localStorage.getItem(LS_STORAGE_KEY);
+      if (lsData) {
+        const parsed = { ...defaultSettings, ...JSON.parse(lsData) };
+        // Save to file storage
+        await storageWrite(STORAGE_KEY, JSON.stringify(parsed)).catch(() => {});
+        // Clean up localStorage
+        localStorage.removeItem(LS_STORAGE_KEY);
+        set({ settings: parsed, loaded: true });
+        return;
+      }
+    } catch { /* ignore */ }
+
+    // 3. Defaults
+    set({ loaded: true });
+  },
 
   updateSettings: (partial) => {
     const newSettings = { ...get().settings, ...partial };
     set({ settings: newSettings });
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(newSettings));
-  },
-
-  loadSettings: () => {
-    set({ settings: loadFromStorage() });
+    storageWrite(STORAGE_KEY, JSON.stringify(newSettings)).catch(() => {});
   },
 }));
