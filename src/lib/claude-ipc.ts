@@ -12,6 +12,7 @@ export interface SendMessageRequest {
   allowed_tools?: string[];
   api_key?: string;
   base_url?: string;
+  attachments?: { path: string; name: string; type: string }[];
 }
 
 /** Send a message (spawns claude -p per message, with --resume for multi-turn). Returns PID. */
@@ -84,4 +85,9 @@ export async function listDir(path: string): Promise<DirEntry[]> {
 /** Read a text file's content */
 export async function readFile(path: string): Promise<string> {
   return invoke("read_file", { path });
+}
+
+/** Read an image file as a data: URL (base64) */
+export async function readImageBase64(path: string): Promise<string> {
+  return invoke("read_image_base64", { path });
 }

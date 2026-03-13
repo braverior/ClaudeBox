@@ -64,8 +64,8 @@ function TreeNode({ entry, depth, onFileSelect }: { entry: DirEntry; depth: numb
       <button
         onClick={toggle}
         className={`flex items-center gap-1.5 w-full text-left py-1 pr-2 text-xs
-                    hover:bg-bg-tertiary/40 transition-colors rounded-sm
-                    ${entry.is_dir ? "text-text-primary" : "text-text-secondary"}`}
+                    hover:bg-accent/10 active:bg-accent/15 transition-colors rounded-sm
+                    ${entry.is_dir ? "text-text-primary" : "text-text-secondary hover:text-text-primary"}`}
         style={{ paddingLeft: `${depth * 14 + 6}px` }}
       >
         {entry.is_dir ? (

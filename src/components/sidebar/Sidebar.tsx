@@ -129,7 +129,7 @@ export default function Sidebar({ onOpenSettings }: SidebarProps) {
       <SessionList />
 
       {/* Footer */}
-      <div className="border-t border-border px-2 py-2 flex items-center gap-1">
+      <div className="border-t border-border px-2 py-2 flex items-center justify-center gap-1">
         <button
           onClick={toggleLocale}
           className="p-2 rounded-lg text-text-secondary hover:bg-bg-tertiary/50 hover:text-text-primary transition-colors"

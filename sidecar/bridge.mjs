@@ -26,7 +26,40 @@ import { createInterface } from "node:readline";
 import { execSync, spawnSync } from "node:child_process";
 import { writeFileSync, mkdtempSync, chmodSync, unlinkSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
-import { join } from "node:path";
+import { join, extname } from "node:path";
+
+// ── File attachment helpers ─────────────────────────────────────────
+
+/**
+ * Process attachments into prompt text.
+ * - Text files → read content, embed as fenced code blocks
+ * - Images → include file path so Claude Code uses its Read tool to view them
+ * @param {Array<{path: string, name: string, type: string}>} attachments
+ * @returns {string} Text to append to the prompt
+ */
+function processAttachments(attachments) {
+  const parts = [];
+
+  for (const att of attachments) {
+    try {
+      if (att.type === "image") {
+        // Let Claude Code's Read tool handle image files — it supports
+        // reading images (PNG, JPG, etc.) and presenting them visually.
+        parts.push(`[Attached image: ${att.path}]`);
+      } else {
+        // Text / code file — read and embed inline
+        const content = readFileSync(att.path, "utf-8");
+        const ext = extname(att.name).replace(/^\./, "") || "text";
+        parts.push(`\`\`\`${ext} title="${att.name}"\n${content}\n\`\`\``);
+      }
+    } catch (e) {
+      console.error(`[bridge] Failed to read attachment ${att.path}: ${e.message}`);
+      parts.push(`[Failed to read file: ${att.name} — ${e.message}]`);
+    }
+  }
+
+  return parts.length > 0 ? "\n\n" + parts.join("\n\n") : "";
+}
 
 // ── Pre-flight & diagnostics ────────────────────────────────────────
 
@@ -403,6 +436,7 @@ async function main() {
     resume,
     allowedTools,
     permissionMode,
+    attachments,
   } = startMsg;
 
   // Log config for diagnostics (to stderr, which Rust captures)
@@ -444,7 +478,15 @@ async function main() {
   }
 
   try {
-    const conversation = query({ prompt, options });
+    // Process file attachments — append to prompt as text
+    let finalPrompt = prompt;
+
+    if (attachments && attachments.length > 0) {
+      finalPrompt = prompt + processAttachments(attachments);
+      console.error(`[bridge] Processed ${attachments.length} attachment(s)`);
+    }
+
+    const conversation = query({ prompt: finalPrompt, options });
 
     for await (const message of conversation) {
       // Emit messages in a format compatible with the existing stream-json output

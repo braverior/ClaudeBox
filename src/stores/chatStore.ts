@@ -27,7 +27,8 @@ interface ChatState {
   messages: Record<string, ChatMessage[]>;
   stderrLogs: Record<string, string[]>;
   streamStartTimes: Record<string, number>;
-  isStreaming: boolean;
+  /** Per-session streaming state */
+  streamingSessions: Record<string, boolean>;
   streamError: string | null;
   /** Pending interactive tool request (AskUserQuestion / ExitPlanMode) */
   pendingInteraction: PendingInteraction | null;
@@ -36,11 +37,12 @@ interface ChatState {
   removeSession: (id: string) => void;
   switchSession: (id: string) => void;
   updateSession: (id: string, updates: Partial<Pick<Session, "model" | "permissionMode" | "allowedTools">>) => void;
-  addUserMessage: (sessionId: string, content: string) => void;
+  addUserMessage: (sessionId: string, content: string, attachments?: { name: string; type: string; path?: string; dataUrl?: string }[]) => void;
   addSystemMessage: (sessionId: string, text: string) => void;
+  addLaunchMessage: (sessionId: string, pid: number) => void;
   handleStreamData: (sessionId: string, data: string, stream: string) => void;
   handleStreamDone: (sessionId: string, error?: string) => void;
-  setStreaming: (streaming: boolean) => void;
+  setStreaming: (sessionId: string, streaming: boolean) => void;
   clearError: () => void;
   loadSessions: () => void;
   /** Clear the pending interaction after it has been responded to */
@@ -168,7 +170,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   messages: initialMessages,
   stderrLogs: {},
   streamStartTimes: {},
-  isStreaming: false,
+  streamingSessions: {},
   streamError: null,
   pendingInteraction: null,
 
@@ -243,12 +245,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ sessions });
   },
 
-  addUserMessage: (sessionId, content) => {
+  addUserMessage: (sessionId, content, attachments) => {
     const msg: ChatMessage = {
       id: v4Style(),
       role: "user",
       content: [{ type: "text", text: content }],
       timestamp: Date.now(),
+      attachments,
     };
     const msgs = [...(get().messages[sessionId] || []), msg];
     // Clear task list for a fresh interaction
@@ -270,6 +273,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ messages: { ...get().messages, [sessionId]: msgs } });
   },
 
+  addLaunchMessage: (sessionId, pid) => {
+    const msg: ChatMessage = {
+      id: v4Style(),
+      role: "assistant",
+      content: [{ type: "text", text: `__launch__:${JSON.stringify({ pid })}` }],
+      timestamp: Date.now(),
+      isStreaming: true,
+      streamMessageId: "__launch__",
+    };
+    const msgs = [...(get().messages[sessionId] || []), msg];
+    set({ messages: { ...get().messages, [sessionId]: msgs } });
+  },
+
   handleStreamData: (sessionId, data, stream) => {
     if (stream === "stderr") {
       const logs = [...(get().stderrLogs[sessionId] || []), data];
@@ -282,9 +298,46 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const event: StreamMessage = JSON.parse(data);
       const msgs = [...(get().messages[sessionId] || [])];
 
+      // Helper: finalize the launch placeholder when real content arrives
+      const finalizeLaunch = () => {
+        const launchIdx = msgs.findIndex(
+          (m) => m.role === "assistant" && m.streamMessageId === "__launch__"
+        );
+        if (launchIdx >= 0) {
+          msgs[launchIdx] = { ...msgs[launchIdx], isStreaming: false };
+        }
+      };
+
+      if (event.type === "system") {
+        // Any system event finalizes the launch message
+        const launchIdx = msgs.findIndex(
+          (m) => m.role === "assistant" && m.streamMessageId === "__launch__"
+        );
+        if (launchIdx >= 0 && event.session_id) {
+          const old = msgs[launchIdx];
+          const oldText = old.content[0]?.text || "";
+          try {
+            const info = JSON.parse(oldText.replace("__launch__:", ""));
+            info.sessionId = event.session_id;
+            msgs[launchIdx] = {
+              ...old,
+              isStreaming: false,
+              content: [{ type: "text", text: `__launch__:${JSON.stringify(info)}` }],
+            };
+          } catch {
+            msgs[launchIdx] = { ...old, isStreaming: false };
+          }
+        } else if (launchIdx >= 0) {
+          msgs[launchIdx] = { ...msgs[launchIdx], isStreaming: false };
+        }
+      }
+
       if (event.type === "assistant" && event.message) {
         const incomingContent: ContentBlock[] = event.message.content || [];
         const streamMsgId = event.message.id;
+
+        // Finalize launch placeholder when first real assistant content arrives
+        finalizeLaunch();
 
         // Process task tool calls
         processTaskToolCalls(sessionId, incomingContent);
@@ -387,7 +440,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             msgs[i] = { ...msgs[i], isStreaming: false };
           }
         }
-        set({ isStreaming: false, pendingInteraction: null });
+        set({ streamingSessions: { ...get().streamingSessions, [sessionId]: false }, pendingInteraction: null });
       } else if (event.type === "ask_user" && event.requestId) {
         // Interactive: Claude is asking the user a question
         set({
@@ -439,12 +492,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({
       sessions,
       messages: { ...get().messages, [sessionId]: msgs },
-      isStreaming: false,
+      streamingSessions: { ...get().streamingSessions, [sessionId]: false },
       streamError: error || null,
     });
   },
 
-  setStreaming: (streaming) => set({ isStreaming: streaming }),
+  setStreaming: (sessionId, streaming) => set({
+    streamingSessions: { ...get().streamingSessions, [sessionId]: streaming },
+  }),
   clearError: () => set({ streamError: null }),
   loadSessions: () => set({ sessions: loadSessions() }),
   clearPendingInteraction: () => set({ pendingInteraction: null }),

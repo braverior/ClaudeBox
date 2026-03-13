@@ -6,7 +6,7 @@ import { getCurrentWindow, PhysicalSize } from "@tauri-apps/api/window";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { useT } from "../../lib/i18n";
 import MessageBubble from "./MessageBubble";
-import InputArea from "./InputArea";
+import InputArea, { type Attachment } from "./InputArea";
 import TaskBoard from "./TaskBoard";
 import FileTree from "./FileTree";
 import FileViewer from "./FileViewer";
@@ -21,12 +21,13 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
     currentSessionId,
     sessions,
     messages,
-    isStreaming,
+    streamingSessions,
     streamError,
     streamStartTimes,
     pendingInteraction,
     addUserMessage,
     addSystemMessage,
+    addLaunchMessage,
     handleStreamData,
     handleStreamDone,
     setStreaming,
@@ -39,6 +40,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
   const t = useT();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const currentSession = sessions.find((s) => s.id === currentSessionId);
+  const isStreaming = currentSessionId ? !!streamingSessions[currentSessionId] : false;
   const [gitBranch, setGitBranch] = useState<string | null>(null);
   const [showFilePanel, setShowFilePanel] = useState(false);
   const [openFilePath, setOpenFilePath] = useState<string | null>(null);
@@ -87,7 +89,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
   }, [messages, currentSessionId]);
 
   const handleSend = useCallback(
-    async (content: string) => {
+    async (content: string, attachments?: Attachment[]) => {
       if (!currentSessionId || !currentSession) return;
 
       // Validate config before sending
@@ -109,11 +111,15 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
         return;
       }
 
-      addUserMessage(currentSessionId, content);
-      setStreaming(true);
+      addUserMessage(
+        currentSessionId,
+        content,
+        attachments?.map((a) => ({ name: a.name, type: a.type, path: a.path, dataUrl: a.dataUrl }))
+      );
+      setStreaming(currentSessionId, true);
       clearError();
       try {
-        await sendMessage({
+        const pid = await sendMessage({
           session_id: currentSessionId,
           message: content,
           cwd: currentSession.projectPath,
@@ -125,12 +131,18 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
             : undefined,
           api_key: settings.apiKey || undefined,
           base_url: settings.baseUrl || undefined,
+          attachments: attachments?.map((a) => ({
+            path: a.path,
+            name: a.name,
+            type: a.type,
+          })),
         });
+        addLaunchMessage(currentSessionId, pid);
       } catch (err) {
         handleStreamDone(currentSessionId, String(err));
       }
     },
-    [currentSessionId, currentSession, settings, addUserMessage, addSystemMessage, setStreaming, clearError, handleStreamDone]
+    [currentSessionId, currentSession, settings, addUserMessage, addSystemMessage, addLaunchMessage, setStreaming, clearError, handleStreamDone]
   );
 
   const handleStop = useCallback(async () => {
@@ -273,7 +285,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
           ) : (
             <>
               {/* Messages */}
-              <div className="flex-1 overflow-y-auto py-4">
+              <div className="flex-1 overflow-y-auto pt-4 pb-2">
                 <div className="max-w-3xl mx-auto overflow-hidden">
                   {currentMessages.length === 0 && (
                     <div className="text-center py-16 text-text-muted">

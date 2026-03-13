@@ -86,6 +86,8 @@ export interface ChatMessage {
   isStreaming?: boolean;
   /** Track the original stream message id so we can append content blocks for the same turn */
   streamMessageId?: string;
+  /** Attachment metadata for user messages */
+  attachments?: { name: string; type: string; path?: string; dataUrl?: string }[];
   /** Per-turn metadata, stored on the last assistant message when the turn completes */
   turnMeta?: {
     tokens: number;

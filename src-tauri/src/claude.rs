@@ -245,6 +245,14 @@ pub struct StreamPayload {
     pub stream: String,
 }
 
+#[derive(Deserialize, Clone, Serialize)]
+pub struct Attachment {
+    pub path: String,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub file_type: String,
+}
+
 #[derive(Deserialize)]
 pub struct SendMessageRequest {
     pub session_id: String,
@@ -258,6 +266,7 @@ pub struct SendMessageRequest {
     pub allowed_tools: Option<Vec<String>>,
     pub api_key: Option<String>,
     pub base_url: Option<String>,
+    pub attachments: Option<Vec<Attachment>>,
 }
 
 // ── Commands ─────────────────────────────────────────────────────────
@@ -325,6 +334,7 @@ pub async fn send_message(
         "resume": resume_id.as_deref().unwrap_or(""),
         "allowedTools": request.allowed_tools.as_deref().unwrap_or(&[]),
         "permissionMode": request.permission_mode.as_deref().unwrap_or(""),
+        "attachments": request.attachments.as_deref().unwrap_or(&[]),
     });
 
     emit_debug(&app, &session_id, "process", &format!("$ node {} (start: prompt=\"{}\")",
@@ -637,4 +647,27 @@ pub fn read_file(path: String) -> Result<String, String> {
         return Err("File too large (>2MB)".to_string());
     }
     std::fs::read_to_string(&path).map_err(|e| e.to_string())
+}
+
+/// Read an image file and return a data: URL (base64).
+/// Limited to 10MB. Returns `data:<mime>;base64,<data>`.
+#[tauri::command]
+pub fn read_image_base64(path: String) -> Result<String, String> {
+    use base64::Engine as _;
+    let metadata = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+    if metadata.len() > 10 * 1024 * 1024 {
+        return Err("Image too large (>10MB)".to_string());
+    }
+    let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+    let mime = match path.rsplit('.').next().map(|s| s.to_lowercase()).as_deref() {
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("svg") => "image/svg+xml",
+        Some("bmp") => "image/bmp",
+        _ => "application/octet-stream",
+    };
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(format!("data:{};base64,{}", mime, b64))
 }

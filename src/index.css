@@ -27,18 +27,18 @@
 .light {
   --color-bg-primary: #ffffff;
   --color-bg-secondary: #f7f7f8;
-  --color-bg-tertiary: #e8ecf1;
+  --color-bg-tertiary: #dde1e8;
   --color-bg-chat: #fafafa;
   --color-accent: #d93651;
   --color-accent-hover: #c22d46;
   --color-text-primary: #1a1a2e;
   --color-text-secondary: #555;
   --color-text-muted: #999;
-  --color-border: #e0e0e8;
+  --color-border: #d0d0da;
   --color-user-bubble: #e8e8f4;
   --color-assistant-bg: #f2f2f8;
   --color-tool-bg: #f5f5fa;
-  --color-input-bg: #f0f0f5;
+  --color-input-bg: #e9e9f0;
   --color-code-bg: #f6f8fa;
   --color-code-header: #eaeef2;
   --color-success: #16a34a;
@@ -164,15 +164,12 @@ html, body, #root {
 }
 .markdown-body blockquote p { margin: 0.3em 0; }
 
-/* Tables — wrap in scrollable container to prevent overflow */
+/* Tables */
 .markdown-body table {
   border-collapse: collapse;
   margin: 0.8em 0;
   width: 100%;
   font-size: 0.9em;
-  border-radius: 8px;
-  overflow: hidden;
-  border: 1px solid var(--color-border);
   display: block;
   overflow-x: auto;
 }
@@ -180,11 +177,11 @@ html, body, #root {
   background: var(--color-bg-tertiary);
   font-weight: 600;
   text-align: left;
-  padding: 0.6em 0.9em;
+  padding: 0.5em 0.8em;
   border: 1px solid var(--color-border);
 }
 .markdown-body td {
-  padding: 0.5em 0.9em;
+  padding: 0.4em 0.8em;
   border: 1px solid var(--color-border);
 }
 .markdown-body tr:nth-child(even) { background: rgba(255, 255, 255, 0.02); }

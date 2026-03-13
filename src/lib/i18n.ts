@@ -37,6 +37,10 @@ const en: TranslationDict = {
   "input.tools": "Tools",
   "input.selectAll": "Select All",
   "input.deselectAll": "Deselect All",
+  "input.attach": "Attach files",
+  "input.attachFiles": "Attach Files",
+  "chat.launching": "Claude is starting...",
+  "chat.launched": "Claude started",
 
   // Permission modes
   "mode.default": "Default",
@@ -143,6 +147,10 @@ const zh: TranslationDict = {
   "input.tools": "工具",
   "input.selectAll": "全选",
   "input.deselectAll": "取消全选",
+  "input.attach": "附加文件",
+  "input.attachFiles": "添加附件",
+  "chat.launching": "Claude 启动中...",
+  "chat.launched": "Claude 已启动",
 
   // Permission modes
   "mode.default": "默认",

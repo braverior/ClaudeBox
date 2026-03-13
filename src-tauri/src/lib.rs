@@ -27,6 +27,7 @@ pub fn run() {
             claude::open_in_browser,
             claude::list_dir,
             claude::read_file,
+            claude::read_image_base64,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

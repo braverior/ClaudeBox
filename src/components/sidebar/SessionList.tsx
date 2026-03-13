@@ -8,6 +8,7 @@ export default function SessionList() {
   const {
     sessions,
     currentSessionId,
+    streamingSessions,
     switchSession,
     removeSession,
   } = useChatStore();
@@ -37,6 +38,7 @@ export default function SessionList() {
     <div className="flex-1 overflow-y-auto px-2 py-1">
       {sessions.map((session) => {
         const isActive = session.id === currentSessionId;
+        const isRunning = !!streamingSessions[session.id];
         return (
           <div
             key={session.id}
@@ -49,8 +51,13 @@ export default function SessionList() {
           >
             <FolderOpen size={14} className="flex-shrink-0 opacity-60" />
             <div className="flex-1 min-w-0">
-              <div className="text-sm truncate" title={session.projectPath}>
-                {session.projectName}
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm truncate" title={session.projectPath}>
+                  {session.projectName}
+                </span>
+                {isRunning && (
+                  <span className="flex-shrink-0 w-2 h-2 rounded-full bg-success animate-pulse" />
+                )}
               </div>
               <div className="text-xs text-text-muted mt-0.5">
                 <span>{formatRelativeDate(session.updatedAt)}</span>

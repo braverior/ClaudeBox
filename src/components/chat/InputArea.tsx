@@ -1,9 +1,74 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Send, Square, AlertCircle, ChevronDown, ChevronUp, GitBranch, Wrench, Check } from "lucide-react";
+import {
+  Send, Square, AlertCircle, ChevronDown, ChevronUp, GitBranch,
+  Wrench, Check, Paperclip, X, FileCode2, FileText,
+  Image, FileType, Terminal, Globe, Settings2, Cpu, Shield,
+} from "lucide-react";
+import { open } from "@tauri-apps/plugin-dialog";
+import { readImageBase64 } from "../../lib/claude-ipc";
+import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { useT } from "../../lib/i18n";
 
+export interface Attachment {
+  path: string;
+  name: string;
+  type: "text" | "image";
+  /** Base64 data URL for image preview */
+  dataUrl?: string;
+}
+
+const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"]);
+
+function getAttachmentType(filename: string): "text" | "image" {
+  const ext = filename.split(".").pop()?.toLowerCase() || "";
+  return IMAGE_EXTENSIONS.has(ext) ? "image" : "text";
+}
+
+/** File category for visual styling */
+type FileCategory = "code" | "config" | "doc" | "web" | "shell" | "image" | "other";
+
+const EXT_CATEGORY: Record<string, FileCategory> = {
+  ts: "code", tsx: "code", js: "code", jsx: "code", py: "code",
+  rs: "code", go: "code", java: "code", rb: "code", php: "code",
+  c: "code", cpp: "code", h: "code", lua: "code",
+  json: "config", yaml: "config", yml: "config", toml: "config",
+  ini: "config", cfg: "config", conf: "config",
+  md: "doc", txt: "doc", log: "doc",
+  html: "web", css: "web", xml: "web", svg: "web",
+  sh: "shell", sql: "shell",
+  png: "image", jpg: "image", jpeg: "image", gif: "image",
+  webp: "image", bmp: "image",
+};
+
+const CATEGORY_STYLE: Record<FileCategory, { bg: string; text: string; border: string }> = {
+  code:   { bg: "bg-blue-500/10",   text: "text-blue-400",   border: "border-blue-500/20" },
+  config: { bg: "bg-amber-500/10",  text: "text-amber-400",  border: "border-amber-500/20" },
+  doc:    { bg: "bg-emerald-500/10", text: "text-emerald-400", border: "border-emerald-500/20" },
+  web:    { bg: "bg-purple-500/10", text: "text-purple-400", border: "border-purple-500/20" },
+  shell:  { bg: "bg-orange-500/10", text: "text-orange-400", border: "border-orange-500/20" },
+  image:  { bg: "bg-rose-500/10",   text: "text-rose-400",   border: "border-rose-500/20" },
+  other:  { bg: "bg-zinc-500/10",   text: "text-zinc-400",   border: "border-zinc-500/20" },
+};
+
+function getCategoryIcon(cat: FileCategory) {
+  switch (cat) {
+    case "code":   return FileCode2;
+    case "config": return Settings2;
+    case "doc":    return FileText;
+    case "web":    return Globe;
+    case "shell":  return Terminal;
+    case "image":  return Image;
+    default:       return FileType;
+  }
+}
+
+function getFileCategory(filename: string): FileCategory {
+  const ext = filename.split(".").pop()?.toLowerCase() || "";
+  return EXT_CATEGORY[ext] || "other";
+}
+
 interface InputAreaProps {
-  onSend: (message: string) => void;
+  onSend: (message: string, attachments?: Attachment[]) => void;
   onStop: () => void;
   isStreaming: boolean;
   disabled?: boolean;
@@ -34,10 +99,14 @@ function DropdownSelect({
   value,
   options,
   onChange,
+  icon,
+  tooltip,
 }: {
   value: string;
   options: { value: string; label: string }[];
   onChange: (v: string) => void;
+  icon?: React.ReactNode;
+  tooltip?: string;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -60,13 +129,15 @@ function DropdownSelect({
         className="flex items-center gap-1 px-2 py-1 rounded-md text-xs
                    text-text-secondary hover:text-text-primary hover:bg-bg-tertiary/50
                    transition-colors"
+        title={tooltip}
       >
-        <span>{current.label}</span>
-        <ChevronDown size={12} />
+        {icon}
+        <span className="truncate max-w-[160px]">{current.label}</span>
+        <ChevronDown size={12} className="flex-shrink-0" />
       </button>
       {open && (
-        <div className="absolute bottom-full left-0 mb-1 min-w-[100px] rounded-lg
-                        bg-bg-secondary border border-border shadow-xl z-20 py-1">
+        <div className="absolute bottom-full left-0 mb-1 min-w-[120px] max-w-[260px] rounded-lg
+                        bg-bg-secondary border border-border shadow-xl z-50 py-1">
           {options.map((opt) => (
             <button
               key={opt.value}
@@ -74,7 +145,7 @@ function DropdownSelect({
                 onChange(opt.value);
                 setOpen(false);
               }}
-              className={`block w-full text-left px-3 py-1.5 text-xs transition-colors
+              className={`block w-full text-left px-3 py-1.5 text-xs transition-colors truncate
                 ${
                   opt.value === value
                     ? "text-accent bg-accent/10"
@@ -136,8 +207,7 @@ function ToolsSelector({
       </button>
       {open && (
         <div className="absolute bottom-full left-0 mb-1 min-w-[150px] rounded-lg
-                        bg-bg-secondary border border-border shadow-xl z-20 py-1">
-          {/* Select all / none */}
+                        bg-bg-secondary border border-border shadow-xl z-50 py-1">
           <button
             onClick={() => onChange(allSelected ? [] : ALL_TOOLS.map((t) => t.value))}
             className="block w-full text-left px-3 py-1.5 text-xs text-text-muted
@@ -174,6 +244,73 @@ function ToolsSelector({
   );
 }
 
+/** Single attachment chip */
+function AttachmentChip({
+  att,
+  onRemove,
+  onOpen,
+}: {
+  att: Attachment;
+  onRemove: () => void;
+  onOpen: () => void;
+}) {
+  const cat = getFileCategory(att.name);
+  const style = CATEGORY_STYLE[cat];
+  const Icon = getCategoryIcon(cat);
+  const ext = att.name.split(".").pop()?.toLowerCase() || "";
+
+  if (att.type === "image") {
+    return (
+      <div
+        className={`relative group rounded-lg overflow-hidden border ${style.border} flex-shrink-0 cursor-pointer`}
+        onDoubleClick={onOpen}
+        title={att.name}
+      >
+        {att.dataUrl ? (
+          <img src={att.dataUrl} alt={att.name} className="w-16 h-16 object-cover" />
+        ) : (
+          <div className="w-16 h-16 flex items-center justify-center bg-rose-500/5">
+            <Image size={20} className="text-rose-400/50" />
+          </div>
+        )}
+        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-1.5 py-1">
+          <span className="text-[10px] text-white/90 truncate block">{att.name}</span>
+        </div>
+        <button
+          onClick={(e) => { e.stopPropagation(); onRemove(); }}
+          className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/60 flex items-center justify-center
+                     opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/80"
+        >
+          <X size={10} className="text-white" />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`flex items-center gap-1.5 pl-2 pr-1 py-1.5 rounded-lg border ${style.border} ${style.bg}
+                   group flex-shrink-0 cursor-pointer hover:brightness-110 transition-all`}
+      onDoubleClick={onOpen}
+      title={att.path}
+    >
+      <Icon size={14} className={style.text} />
+      <div className="flex flex-col min-w-0 leading-none">
+        <span className="text-[11px] text-text-primary truncate max-w-[100px]">{att.name}</span>
+        <span className={`text-[9px] ${style.text} uppercase font-medium`}>{ext}</span>
+      </div>
+      <button
+        onClick={(e) => { e.stopPropagation(); onRemove(); }}
+        className="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0
+                   text-text-muted opacity-0 group-hover:opacity-100 hover:text-error hover:bg-error/10
+                   transition-all"
+      >
+        <X size={10} />
+      </button>
+    </div>
+  );
+}
+
 export default function InputArea({
   onSend,
   onStop,
@@ -189,19 +326,78 @@ export default function InputArea({
   onAllowedToolsChange,
 }: InputAreaProps) {
   const [input, setInput] = useState("");
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const t = useT();
 
+  const handleAttach = useCallback(async () => {
+    try {
+      const selected = await open({
+        multiple: true,
+        filters: [
+          {
+            name: "All Supported",
+            extensions: [
+              "png", "jpg", "jpeg", "gif", "webp", "svg", "bmp",
+              "ts", "tsx", "js", "jsx", "json", "md", "txt", "rs", "py", "go",
+              "html", "css", "yaml", "yml", "toml", "sh", "sql", "xml", "c",
+              "cpp", "h", "java", "rb", "php", "lua", "log", "conf", "cfg", "ini",
+            ],
+          },
+          {
+            name: "Images",
+            extensions: ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"],
+          },
+          {
+            name: "Code & Text",
+            extensions: [
+              "ts", "tsx", "js", "jsx", "json", "md", "txt", "rs", "py", "go",
+              "html", "css", "yaml", "yml", "toml", "sh", "sql", "xml", "c",
+              "cpp", "h", "java", "rb", "php", "lua", "log", "conf", "cfg", "ini",
+            ],
+          },
+        ],
+      });
+      if (!selected) return;
+      const paths = Array.isArray(selected) ? selected : [selected];
+      const newAttachments: Attachment[] = [];
+      for (const p of paths) {
+        const name = p.split(/[\\/]/).pop() || p;
+        const type = getAttachmentType(name);
+        let dataUrl: string | undefined;
+        if (type === "image") {
+          try {
+            dataUrl = await readImageBase64(p);
+          } catch (e) {
+            console.error("Failed to read image:", e);
+          }
+        }
+        newAttachments.push({ path: p, name, type, dataUrl });
+      }
+      setAttachments((prev) => [...prev, ...newAttachments]);
+    } catch (e) {
+      console.error("File dialog error:", e);
+    }
+  }, []);
+
+  const removeAttachment = useCallback((index: number) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
+  const openAttachment = useCallback((att: Attachment) => {
+    shellOpen(att.path).catch(() => {});
+  }, []);
+
   const handleSend = useCallback(() => {
     const trimmed = input.trim();
-    if (!trimmed || disabled) return;
-    onSend(trimmed);
+    if ((!trimmed && attachments.length === 0) || disabled) return;
+    onSend(trimmed, attachments.length > 0 ? attachments : undefined);
     setInput("");
-    // Reset textarea height
+    setAttachments([]);
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
-  }, [input, disabled, onSend]);
+  }, [input, attachments, disabled, onSend]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -211,7 +407,6 @@ export default function InputArea({
     }
   };
 
-  // Auto-resize textarea
   useEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
@@ -219,15 +414,36 @@ export default function InputArea({
     textarea.style.height = Math.min(textarea.scrollHeight, 200) + "px";
   }, [input]);
 
-  // Focus on mount
   useEffect(() => {
     textareaRef.current?.focus();
   }, []);
 
+  const hasContent = input.trim() || attachments.length > 0;
+
   return (
-    <div className="border-t border-border px-4 py-3">
+    <div className="px-4 pt-1 pb-4">
       <div className="max-w-3xl mx-auto">
-        <div className="flex items-end gap-2">
+        {/* Unified input container */}
+        <div className={`rounded-2xl border transition-colors overflow-visible
+          ${disabled ? "opacity-50 border-border bg-input-bg" : "border-border bg-input-bg focus-within:border-accent/60 focus-within:ring-1 focus-within:ring-accent/20"}`}
+        >
+          {/* Attachment area */}
+          {attachments.length > 0 && (
+            <div className="px-3 pt-3 pb-1">
+              <div className="flex flex-wrap gap-2">
+                {attachments.map((att, i) => (
+                  <AttachmentChip
+                    key={`${att.path}-${i}`}
+                    att={att}
+                    onRemove={() => removeAttachment(i)}
+                    onOpen={() => openAttachment(att)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Textarea */}
           <textarea
             ref={textareaRef}
             value={input}
@@ -236,86 +452,110 @@ export default function InputArea({
             placeholder={t("input.placeholder")}
             rows={1}
             disabled={disabled}
-            className="flex-1 resize-none rounded-xl bg-input-bg border border-border px-4 py-3
+            className="w-full resize-none bg-transparent px-4 py-2
                        text-text-primary placeholder:text-text-muted
-                       focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent
-                       disabled:opacity-50 transition-colors
-                       overflow-hidden"
+                       focus:outline-none disabled:cursor-not-allowed
+                       overflow-hidden text-[0.9375rem]"
           />
-          {isStreaming ? (
-            <button
-              onClick={onStop}
-              className="flex items-center justify-center w-10 h-10 rounded-xl
-                         bg-error/20 text-error hover:bg-error/30 transition-colors"
-              title={t("input.stop")}
-            >
-              <Square size={18} />
-            </button>
-          ) : (
-            <button
-              onClick={handleSend}
-              disabled={!input.trim() || disabled}
-              className="flex items-center justify-center w-10 h-10 rounded-xl
-                         bg-accent text-white hover:bg-accent-hover transition-colors
-                         disabled:opacity-30 disabled:cursor-not-allowed"
-              title={t("input.send")}
-            >
-              <Send size={18} />
-            </button>
-          )}
-        </div>
 
-        {/* Toolbar: model, mode, tools, git branch */}
-        {onModelChange && onPermissionModeChange && (
-          <div className="flex items-center gap-1 mt-1.5 px-1">
-            <span className="text-[10px] text-text-muted mr-0.5">{t("input.model")}</span>
-            {models.length > 0 ? (
-              <DropdownSelect
-                value={model}
-                options={models.map((m) => ({ value: m, label: m }))}
-                onChange={(v) => onModelChange?.(v)}
-              />
-            ) : (
-              <input
-                type="text"
-                value={model}
-                onChange={(e) => onModelChange?.(e.target.value)}
-                placeholder={t("input.addModelsHint")}
-                className="w-48 px-2 py-0.5 rounded-md text-xs bg-transparent border border-transparent
-                           text-text-secondary hover:border-border focus:border-accent focus:outline-none
-                           placeholder:text-text-muted/50 transition-colors"
-              />
-            )}
-            <span className="text-border mx-1">|</span>
-            <span className="text-[10px] text-text-muted mr-0.5">{t("input.mode")}</span>
-            <DropdownSelect
-              value={permissionMode}
-              options={[
-                { value: "", label: t("mode.default") },
-                { value: "auto", label: t("mode.auto") },
-                { value: "plan", label: t("mode.plan") },
-              ]}
-              onChange={onPermissionModeChange}
-            />
-            {onAllowedToolsChange && (
-              <>
-                <span className="text-border mx-1">|</span>
-                <ToolsSelector
-                  selected={allowedTools}
-                  onChange={onAllowedToolsChange}
-                  t={t}
+          {/* Bottom bar: attach + toolbar + send */}
+          <div className="flex items-center gap-1 px-2 pb-1">
+            <button
+              onClick={handleAttach}
+              disabled={disabled}
+              className="flex items-center justify-center w-8 h-8 rounded-lg flex-shrink-0
+                         text-text-muted hover:text-text-primary hover:bg-bg-tertiary/50 transition-colors
+                         disabled:opacity-30 disabled:cursor-not-allowed"
+              title={t("input.attach")}
+            >
+              <Paperclip size={16} />
+            </button>
+
+            {/* Inline toolbar */}
+            {onModelChange && onPermissionModeChange && (
+              <div className="flex items-center gap-1 min-w-0 flex-wrap">
+                {models.length > 0 ? (
+                  <DropdownSelect
+                    value={model}
+                    options={models.map((m) => ({ value: m, label: m }))}
+                    onChange={(v) => onModelChange?.(v)}
+                    icon={<Cpu size={12} className="flex-shrink-0" />}
+                    tooltip={t("input.model")}
+                  />
+                ) : (
+                  <input
+                    type="text"
+                    value={model}
+                    onChange={(e) => onModelChange?.(e.target.value)}
+                    placeholder={t("input.addModelsHint")}
+                    className="w-40 px-2 py-1 rounded-md text-xs bg-transparent border border-transparent
+                               text-text-secondary hover:border-border focus:border-accent focus:outline-none
+                               placeholder:text-text-muted/50 transition-colors"
+                  />
+                )}
+                <span className="text-border/40 mx-0.5 flex-shrink-0">|</span>
+                <DropdownSelect
+                  value={permissionMode}
+                  options={[
+                    { value: "", label: t("mode.default") },
+                    { value: "auto", label: t("mode.auto") },
+                    { value: "plan", label: t("mode.plan") },
+                  ]}
+                  onChange={onPermissionModeChange}
+                  icon={<Shield size={12} className="flex-shrink-0" />}
+                  tooltip={t("input.mode")}
                 />
-              </>
+                {onAllowedToolsChange && (
+                  <>
+                    <span className="text-border/40 mx-0.5 flex-shrink-0">|</span>
+                    <ToolsSelector
+                      selected={allowedTools}
+                      onChange={onAllowedToolsChange}
+                      t={t}
+                    />
+                  </>
+                )}
+                {gitBranch && (
+                  <>
+                    <span className="text-border/40 mx-0.5 flex-shrink-0">|</span>
+                    <span className="flex items-center gap-1 text-xs text-text-muted flex-shrink-0">
+                      <GitBranch size={11} />
+                      <span className="truncate max-w-[100px]">{gitBranch}</span>
+                    </span>
+                  </>
+                )}
+              </div>
             )}
-            {gitBranch && (
-              <>
-                <span className="text-border mx-1">|</span>
-                <GitBranch size={11} className="text-text-muted" />
-                <span className="text-xs text-text-muted">{gitBranch}</span>
-              </>
-            )}
+
+            <div className="flex-1" />
+
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              {isStreaming ? (
+                <button
+                  onClick={onStop}
+                  className="flex items-center justify-center w-8 h-8 rounded-lg
+                             bg-error/15 text-error hover:bg-error/25 transition-colors"
+                  title={t("input.stop")}
+                >
+                  <Square size={14} />
+                </button>
+              ) : (
+                <button
+                  onClick={handleSend}
+                  disabled={!hasContent || disabled}
+                  className={`flex items-center justify-center w-8 h-8 rounded-lg transition-all
+                    ${hasContent && !disabled
+                      ? "bg-accent text-white hover:bg-accent-hover shadow-sm shadow-accent/20"
+                      : "bg-bg-tertiary/50 text-text-muted cursor-not-allowed"
+                    }`}
+                  title={t("input.send")}
+                >
+                  <Send size={14} />
+                </button>
+              )}
+            </div>
           </div>
-        )}
+        </div>
 
         {disabled && (
           <div className="flex items-center gap-2 text-warning text-sm mt-2">

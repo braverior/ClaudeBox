@@ -5,8 +5,55 @@ import type { ChatMessage, ContentBlock, PendingInteraction } from "../../lib/st
 import CodeBlock from "./CodeBlock";
 import ToolCallCard from "./ToolCallCard";
 import { formatTimeWithSeconds, formatDuration } from "../../lib/utils";
-import { User, Bot, Loader2, Brain, ChevronDown, ChevronRight, Info } from "lucide-react";
+import { useT } from "../../lib/i18n";
+import { User, Loader2, Brain, ChevronDown, ChevronRight, Info, FileCode2, FileText, Image, FileType, Terminal, Globe, Settings2, Rocket } from "lucide-react";
+import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import type { ComponentPropsWithoutRef } from "react";
+import appLogo from "../../assets/logo-32.png";
+
+// ── File category styling (shared with InputArea) ──────────────────
+
+type FileCategory = "code" | "config" | "doc" | "web" | "shell" | "image" | "other";
+
+const EXT_CATEGORY: Record<string, FileCategory> = {
+  ts: "code", tsx: "code", js: "code", jsx: "code", py: "code",
+  rs: "code", go: "code", java: "code", rb: "code", php: "code",
+  c: "code", cpp: "code", h: "code", lua: "code",
+  json: "config", yaml: "config", yml: "config", toml: "config",
+  ini: "config", cfg: "config", conf: "config",
+  md: "doc", txt: "doc", log: "doc",
+  html: "web", css: "web", xml: "web", svg: "web",
+  sh: "shell", sql: "shell",
+  png: "image", jpg: "image", jpeg: "image", gif: "image",
+  webp: "image", bmp: "image",
+};
+
+const CATEGORY_STYLE: Record<FileCategory, { bg: string; text: string; border: string }> = {
+  code:   { bg: "bg-blue-500/10",    text: "text-blue-400",    border: "border-blue-500/20" },
+  config: { bg: "bg-amber-500/10",   text: "text-amber-400",   border: "border-amber-500/20" },
+  doc:    { bg: "bg-emerald-500/10", text: "text-emerald-400", border: "border-emerald-500/20" },
+  web:    { bg: "bg-purple-500/10",  text: "text-purple-400",  border: "border-purple-500/20" },
+  shell:  { bg: "bg-orange-500/10",  text: "text-orange-400",  border: "border-orange-500/20" },
+  image:  { bg: "bg-rose-500/10",    text: "text-rose-400",    border: "border-rose-500/20" },
+  other:  { bg: "bg-zinc-500/10",    text: "text-zinc-400",    border: "border-zinc-500/20" },
+};
+
+function getCategoryIcon(cat: FileCategory) {
+  switch (cat) {
+    case "code":   return FileCode2;
+    case "config": return Settings2;
+    case "doc":    return FileText;
+    case "web":    return Globe;
+    case "shell":  return Terminal;
+    case "image":  return Image;
+    default:       return FileType;
+  }
+}
+
+function getFileCategory(name: string): FileCategory {
+  const ext = name.split(".").pop()?.toLowerCase() || "";
+  return EXT_CATEGORY[ext] || "other";
+}
 
 /** Memoized text block — only re-renders if text actually changes */
 const TextBlock = memo(function TextBlock({ text }: { text: string }) {
@@ -120,6 +167,7 @@ export default function MessageBubble({
   onRespond,
 }: MessageBubbleProps) {
   const isUser = message.role === "user";
+  const t = useT();
 
   const findToolResult = (toolUseId: string): ContentBlock | undefined => {
     // First search within the same message
@@ -142,13 +190,71 @@ export default function MessageBubble({
     const hasText = message.content.some((b) => b.type === "text" && b.text);
     if (!hasText) return null;
 
+    const imageAtts = message.attachments?.filter((a) => a.type === "image") || [];
+    const textAtts = message.attachments?.filter((a) => a.type !== "image") || [];
+    const openFile = (path?: string) => {
+      if (path) shellOpen(path).catch(() => {});
+    };
+
     return (
       <div className="flex justify-end mb-4 px-4">
         <div className="flex items-start gap-2.5 max-w-[80%] min-w-0">
-          <div className="rounded-2xl rounded-tr-sm px-4 py-2.5 bg-user-bubble text-text-primary overflow-hidden min-w-0">
-            <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-[0.9375rem] leading-relaxed">
-              {message.content[0]?.text || ""}
-            </p>
+          <div className="min-w-0 flex flex-col items-end gap-1.5">
+            {/* Image previews */}
+            {imageAtts.length > 0 && (
+              <div className="flex flex-wrap gap-2 justify-end">
+                {imageAtts.map((att, i) => (
+                  <div
+                    key={i}
+                    className="relative rounded-xl overflow-hidden border border-border/50 cursor-pointer
+                               hover:border-accent/40 transition-colors shadow-sm"
+                    onDoubleClick={() => openFile(att.path)}
+                    title={`${att.name}\nDouble-click to open`}
+                  >
+                    {att.dataUrl ? (
+                      <img src={att.dataUrl} alt={att.name} className="max-w-[240px] max-h-[180px] object-cover" />
+                    ) : (
+                      <div className="w-24 h-24 flex items-center justify-center bg-rose-500/5">
+                        <Image size={24} className="text-rose-400/40" />
+                      </div>
+                    )}
+                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-2 py-1.5">
+                      <span className="text-[11px] text-white/90 truncate block">{att.name}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {/* Text file attachment tags */}
+            {textAtts.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 justify-end">
+                {textAtts.map((att, i) => {
+                  const cat = getFileCategory(att.name);
+                  const style = CATEGORY_STYLE[cat];
+                  const Icon = getCategoryIcon(cat);
+                  const ext = att.name.split(".").pop()?.toLowerCase() || "";
+                  return (
+                    <span
+                      key={i}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border cursor-pointer
+                                   hover:brightness-125 transition-all ${style.bg} ${style.text} ${style.border}`}
+                      onDoubleClick={() => openFile(att.path)}
+                      title={`${att.path || att.name}\nDouble-click to open`}
+                    >
+                      <Icon size={13} />
+                      <span className="text-xs truncate max-w-[140px]">{att.name}</span>
+                      <span className="text-[9px] uppercase font-semibold opacity-60">{ext}</span>
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+            {/* Message text */}
+            <div className="rounded-2xl rounded-tr-sm px-4 py-2.5 bg-user-bubble text-text-primary overflow-hidden min-w-0">
+              <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-[0.9375rem] leading-relaxed">
+                {message.content[0]?.text || ""}
+              </p>
+            </div>
           </div>
           <div className="flex-shrink-0 w-7 h-7 rounded-full bg-accent/20 flex items-center justify-center mt-0.5">
             <User size={14} className="text-accent" />
@@ -174,13 +280,53 @@ export default function MessageBubble({
   const blocks = message.content;
   const totalBlocks = blocks.length;
 
+  // Detect launch placeholder message
+  const launchText = blocks[0]?.text;
+  const isLaunch = message.streamMessageId === "__launch__" && launchText?.startsWith("__launch__:");
+  if (isLaunch) {
+    let info: { pid?: number; sessionId?: string } = {};
+    try { info = JSON.parse((launchText ?? "").replace("__launch__:", "")); } catch { /* */ }
+    return (
+      <div className="flex justify-start px-4 mb-1.5 mt-1">
+        <div className="flex items-start gap-2.5 max-w-[90%] min-w-0">
+          <div className="flex-shrink-0 w-7 h-7 rounded-full overflow-hidden flex items-center justify-center mt-0.5">
+            <img src={appLogo} alt="Claude" className="w-7 h-7" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-bg-tertiary/40 border border-border/50">
+              {message.isStreaming && (
+                <Loader2 size={14} className="animate-spin text-accent flex-shrink-0" />
+              )}
+              {!message.isStreaming && (
+                <Rocket size={14} className="text-accent flex-shrink-0" />
+              )}
+              <div className="flex items-center gap-2 text-xs text-text-secondary flex-wrap">
+                <span>{message.isStreaming ? t("chat.launching") : t("chat.launched")}</span>
+                {info.pid && (
+                  <span className="px-1.5 py-0.5 rounded bg-bg-tertiary text-text-muted text-[10px] font-mono">
+                    PID {info.pid}
+                  </span>
+                )}
+                {info.sessionId && (
+                  <span className="px-1.5 py-0.5 rounded bg-bg-tertiary text-text-muted text-[10px] font-mono truncate max-w-[180px]">
+                    {info.sessionId}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={`flex justify-start px-4 ${showAvatar ? "mb-1.5 mt-1" : "mb-0.5"}`}>
       <div className="flex items-start gap-2.5 max-w-[90%] min-w-0">
         {/* Avatar or spacer */}
         {showAvatar ? (
-          <div className="flex-shrink-0 w-7 h-7 rounded-full bg-bg-tertiary flex items-center justify-center mt-0.5">
-            <Bot size={14} className="text-text-secondary" />
+          <div className="flex-shrink-0 w-7 h-7 rounded-full overflow-hidden flex items-center justify-center mt-0.5">
+            <img src={appLogo} alt="Claude" className="w-7 h-7" />
           </div>
         ) : (
           <div className="flex-shrink-0 w-7" />
