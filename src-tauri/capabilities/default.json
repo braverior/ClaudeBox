@@ -10,6 +10,8 @@
     "dialog:default",
     "dialog:allow-open",
     "core:window:allow-outer-size",
-    "core:window:allow-set-size"
+    "core:window:allow-set-size",
+    "updater:default",
+    "process:default"
   ]
 }

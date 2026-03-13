@@ -286,6 +286,11 @@ export default function MessageBubble({
   if (isLaunch) {
     let info: { pid?: number; sessionId?: string } = {};
     try { info = JSON.parse((launchText ?? "").replace("__launch__:", "")); } catch { /* */ }
+    // Determine "launched" state: either isStreaming is false, or there are real assistant messages after this one
+    const hasContentAfter = allMessages.slice(messageIndex + 1).some(
+      (m) => m.role === "assistant" && m.streamMessageId !== "__launch__"
+    );
+    const launched = !message.isStreaming || hasContentAfter;
     return (
       <div className="flex justify-start px-4 mb-1.5 mt-1">
         <div className="flex items-start gap-2.5 max-w-[90%] min-w-0">
@@ -294,14 +299,14 @@ export default function MessageBubble({
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-bg-tertiary/40 border border-border/50">
-              {message.isStreaming && (
+              {!launched && (
                 <Loader2 size={14} className="animate-spin text-accent flex-shrink-0" />
               )}
-              {!message.isStreaming && (
+              {launched && (
                 <Rocket size={14} className="text-accent flex-shrink-0" />
               )}
               <div className="flex items-center gap-2 text-xs text-text-secondary flex-wrap">
-                <span>{message.isStreaming ? t("chat.launching") : t("chat.launched")}</span>
+                <span>{launched ? t("chat.launched") : t("chat.launching")}</span>
                 {info.pid && (
                   <span className="px-1.5 py-0.5 rounded bg-bg-tertiary text-text-muted text-[10px] font-mono">
                     PID {info.pid}

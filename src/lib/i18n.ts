@@ -110,6 +110,12 @@ const en: TranslationDict = {
   "tool.truncated": "... (truncated)",
   "tool.askQuestion": "Question:",
   "tool.planApprove": "Ready to implement — approve plan?",
+
+  // Update
+  "update.downloading": "Downloading update v{version}...",
+  "update.ready": "Update v{version} is ready to install",
+  "update.restart": "Restart Now",
+  "update.later": "Later",
 };
 
 const zh: TranslationDict = {
@@ -220,6 +226,12 @@ const zh: TranslationDict = {
   "tool.truncated": "...（已截断）",
   "tool.askQuestion": "提问：",
   "tool.planApprove": "计划已就绪 — 是否批准执行？",
+
+  // Update
+  "update.downloading": "正在下载更新 v{version}...",
+  "update.ready": "更新 v{version} 已准备就绪",
+  "update.restart": "立即重启",
+  "update.later": "稍后",
 };
 
 const dictionaries: Record<string, TranslationDict> = { en, zh };

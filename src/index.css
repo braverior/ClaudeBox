@@ -211,3 +211,12 @@ html, body, #root {
 /* Diff: only font color, no background */
 .hljs-addition { color: var(--color-success); background: none !important; }
 .hljs-deletion { color: var(--color-error); background: none !important; }
+
+/* ── Update toast animation ──────────────────────────────── */
+@keyframes slide-down {
+  from { opacity: 0; transform: translate(-50%, -100%); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+.animate-slide-down {
+  animation: slide-down 0.3s ease-out;
+}

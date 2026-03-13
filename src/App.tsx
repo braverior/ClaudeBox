@@ -3,13 +3,21 @@ import Sidebar from "./components/sidebar/Sidebar";
 import ChatPanel from "./components/chat/ChatPanel";
 import SettingsDialog from "./components/settings/SettingsDialog";
 import DebugPanel from "./components/debug/DebugPanel";
+import UpdateToast from "./components/UpdateToast";
 import { checkClaudeInstalled } from "./lib/claude-ipc";
+import {
+  checkAndDownloadUpdate,
+  applyUpdateAndRelaunch,
+  type UpdateStatus,
+} from "./lib/updater";
 import { useSettingsStore } from "./stores/settingsStore";
 
 export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [debugOpen, setDebugOpen] = useState(false);
   const [claudeAvailable, setClaudeAvailable] = useState(true);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
+  const [updateDismissed, setUpdateDismissed] = useState(false);
   const { settings } = useSettingsStore();
 
   // Apply theme class to root element
@@ -43,6 +51,11 @@ export default function App() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
+  // Check for updates on startup (silent background download)
+  useEffect(() => {
+    checkAndDownloadUpdate(setUpdateStatus);
+  }, []);
+
   return (
     <div className="flex h-screen bg-bg-primary">
       <Sidebar onOpenSettings={() => setSettingsOpen(true)} />
@@ -57,6 +70,19 @@ export default function App() {
         onClaudeStatusChange={setClaudeAvailable}
         onOpenDebug={() => setDebugOpen(true)}
       />
+
+      {/* Update toast — shows when update is downloading or ready */}
+      {updateStatus?.available &&
+        !updateDismissed &&
+        (updateStatus.downloading || updateStatus.downloaded) && (
+          <UpdateToast
+            version={updateStatus.version!}
+            body={updateStatus.body}
+            downloading={updateStatus.downloading}
+            onRestart={applyUpdateAndRelaunch}
+            onDismiss={() => setUpdateDismissed(true)}
+          />
+        )}
     </div>
   );
 }

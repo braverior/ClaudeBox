@@ -1,6 +1,40 @@
+# ── Dependencies ──────────────────────────────────────────
 node_modules/
+
+# ── Build output ──────────────────────────────────────────
 dist/
-src-tauri/target/
-.DS_Store
 sidecar/bridge.bundle.mjs
-.claude
+
+# ── Rust / Cargo ──────────────────────────────────────────
+src-tauri/target/
+
+# ── Tauri generated (rebuilt on cargo build) ──────────────
+src-tauri/gen/schemas/
+
+# ── OS files ──────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ── IDE / Editor ──────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ── Environment & secrets ────────────────────────────────
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+
+# ── Logs ──────────────────────────────────────────────────
+*.log
+npm-debug.log*
+
+# ── Claude Code local config ─────────────────────────────
+.claude/

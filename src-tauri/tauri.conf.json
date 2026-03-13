@@ -40,6 +40,15 @@
     ],
     "resources": [
       "../sidecar/bridge.bundle.mjs"
-    ]
+    ],
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDEwMTkwNzQzREY0NkEwQzAKUldUQW9FYmZRd2NaRUpKaFNQbWZ4Y0FQQ2duMjNOeEZ5dWdqMTM0K2FVcDBZYS84dDFMWHR5ckkK",
+      "endpoints": [
+        "https://github.com/braverior/ClaudeBox/releases/latest/download/latest.json"
+      ]
+    }
   }
 }
