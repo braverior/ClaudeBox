@@ -5,6 +5,248 @@ use std::process::{ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex, OnceLock};
 use tauri::{AppHandle, Emitter, State};
 
+// ── System proxy detection ──────────────────────────────────────────
+// Detect system proxy on macOS (scutil --proxy) / Windows (registry).
+//
+// Key insight: HTTP CONNECT proxy (`http://host:port`) often fails in China
+// due to GFW TLS fingerprinting (LibreSSL SSL_ERROR_SYSCALL). SOCKS5 with
+// REMOTE DNS resolution (`socks5h://host:port`) works reliably because:
+// 1. The TLS handshake goes through the encrypted SOCKS5 tunnel
+// 2. DNS is resolved by the proxy server, bypassing GFW DNS pollution
+//    (*.workers.dev domains get poisoned to wrong IPs locally)
+
+/// Cached proxy URLs. Set by `apply_system_proxy` command.
+static PROXY_HTTP: std::sync::LazyLock<Mutex<String>> =
+    std::sync::LazyLock::new(|| Mutex::new(String::new()));
+static PROXY_SOCKS: std::sync::LazyLock<Mutex<String>> =
+    std::sync::LazyLock::new(|| Mutex::new(String::new()));
+
+/// Detect system proxy settings from the OS.
+/// Returns (http_proxy_url, socks_proxy_url) — either or both may be empty.
+fn detect_system_proxy() -> (String, String) {
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(output) = Command::new("scutil")
+            .arg("--proxy")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output()
+        {
+            if output.status.success() {
+                let text = String::from_utf8_lossy(&output.stdout);
+                return parse_scutil_proxy(&text);
+            }
+        }
+        (String::new(), String::new())
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let mut http_proxy = String::new();
+        if let Ok(output) = Command::new("reg")
+            .args(["query", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings", "/v", "ProxyEnable"])
+            .stdout(Stdio::piped()).stderr(Stdio::null()).output()
+        {
+            let text = String::from_utf8_lossy(&output.stdout);
+            let enabled = text.lines().any(|l| l.contains("ProxyEnable") && l.trim().ends_with("0x1"));
+            if enabled {
+                if let Ok(output2) = Command::new("reg")
+                    .args(["query", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings", "/v", "ProxyServer"])
+                    .stdout(Stdio::piped()).stderr(Stdio::null()).output()
+                {
+                    let text2 = String::from_utf8_lossy(&output2.stdout);
+                    for line in text2.lines() {
+                        if line.contains("ProxyServer") {
+                            if let Some(val) = line.split_whitespace().last() {
+                                let val = val.trim();
+                                if !val.is_empty() {
+                                    http_proxy = if val.contains("://") { val.to_string() } else { format!("http://{}", val) };
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        (http_proxy, String::new())
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let http = std::env::var("http_proxy").or_else(|_| std::env::var("HTTP_PROXY")).unwrap_or_default();
+        let socks = std::env::var("all_proxy").or_else(|_| std::env::var("ALL_PROXY")).unwrap_or_default();
+        (http, socks)
+    }
+}
+
+/// Parse macOS `scutil --proxy` output.
+/// Returns (http_proxy_url, socks_proxy_url).
+#[cfg(target_os = "macos")]
+fn parse_scutil_proxy(text: &str) -> (String, String) {
+    let get = |key: &str| -> Option<String> {
+        for line in text.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with(key) {
+                if let Some(val) = trimmed.split(':').last() {
+                    let val = val.trim();
+                    if !val.is_empty() && val != "0" {
+                        return Some(val.to_string());
+                    }
+                }
+            }
+        }
+        None
+    };
+
+    let mut http_url = String::new();
+    if get("HTTPEnable").is_some() {
+        if let (Some(host), Some(port)) = (get("HTTPProxy"), get("HTTPPort")) {
+            http_url = format!("http://{}:{}", host, port);
+        }
+    }
+    if http_url.is_empty() && get("HTTPSEnable").is_some() {
+        if let (Some(host), Some(port)) = (get("HTTPSProxy"), get("HTTPSPort")) {
+            http_url = format!("http://{}:{}", host, port);
+        }
+    }
+
+    // socks5h:// = remote DNS resolution (proxy resolves DNS, bypasses GFW DNS pollution)
+    // This is critical for domains like *.workers.dev whose DNS is poisoned in China.
+    let mut socks_url = String::new();
+    if get("SOCKSEnable").is_some() {
+        if let (Some(host), Some(port)) = (get("SOCKSProxy"), get("SOCKSPort")) {
+            socks_url = format!("socks5h://{}:{}", host, port);
+        }
+    }
+
+    (http_url, socks_url)
+}
+
+/// Detect system proxy and apply as process-level env vars.
+/// - Rust process: `ALL_PROXY=socks5h://...` so reqwest (Tauri updater) uses SOCKS5
+/// - Child processes via command_with_path: `HTTP(S)_PROXY=http://...` for Node.js sidecar
+/// Returns JSON: `{ "desc": "...", "changed": true/false }`
+/// `changed` indicates whether the proxy config differs from the previous call.
+#[derive(Clone, Serialize)]
+pub struct ProxyStatus {
+    pub desc: String,
+    pub changed: bool,
+}
+
+#[tauri::command]
+pub fn apply_system_proxy() -> Result<ProxyStatus, String> {
+    let (http, socks) = detect_system_proxy();
+
+    // Check if changed compared to cached values
+    let changed = {
+        let prev_http = PROXY_HTTP.lock().ok().map(|h| h.clone()).unwrap_or_default();
+        let prev_socks = PROXY_SOCKS.lock().ok().map(|s| s.clone()).unwrap_or_default();
+        http != prev_http || socks != prev_socks
+    };
+
+    // Update cache
+    if let Ok(mut h) = PROXY_HTTP.lock() { *h = http.clone(); }
+    if let Ok(mut s) = PROXY_SOCKS.lock() { *s = socks.clone(); }
+
+    // Apply env vars (always, to ensure consistency)
+    if !socks.is_empty() {
+        std::env::set_var("ALL_PROXY", &socks);
+        std::env::set_var("all_proxy", &socks);
+        std::env::remove_var("HTTPS_PROXY");
+        std::env::remove_var("https_proxy");
+    }
+    if !http.is_empty() {
+        std::env::set_var("HTTP_PROXY", &http);
+        std::env::set_var("http_proxy", &http);
+    }
+    if socks.is_empty() && !http.is_empty() {
+        std::env::set_var("HTTPS_PROXY", &http);
+        std::env::set_var("https_proxy", &http);
+        std::env::set_var("ALL_PROXY", &http);
+        std::env::set_var("all_proxy", &http);
+    }
+    // If proxy was removed entirely, clear env vars
+    if http.is_empty() && socks.is_empty() && changed {
+        for key in ["HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"] {
+            std::env::remove_var(key);
+        }
+    }
+
+    let desc = match (http.is_empty(), socks.is_empty()) {
+        (false, false) => format!("http={}, socks={}", http, socks),
+        (false, true) => format!("http={}", http),
+        (true, false) => format!("socks={}", socks),
+        _ => String::new(),
+    };
+    Ok(ProxyStatus { desc, changed })
+}
+
+/// Probe a URL using curl (native — bypasses WebView CORS).
+/// Uses SOCKS5 proxy if available (more reliable than HTTP CONNECT in China).
+#[derive(Clone, Serialize)]
+pub struct ProbeResult {
+    pub url: String,
+    pub ok: bool,
+    pub status: i32,
+    pub size: u64,
+    pub time_ms: u64,
+    pub version: String,
+    pub error: String,
+}
+
+#[tauri::command]
+pub async fn probe_url(url: String) -> Result<ProbeResult, String> {
+    let url_clone = url.clone();
+    let proxy = PROXY_SOCKS.lock().ok().filter(|s| !s.is_empty()).map(|s| s.clone())
+        .or_else(|| PROXY_HTTP.lock().ok().filter(|s| !s.is_empty()).map(|s| s.clone()))
+        .unwrap_or_default();
+
+    let handle = std::thread::spawn(move || {
+        let start = std::time::Instant::now();
+
+        #[cfg(target_os = "macos")]
+        let mut cmd = Command::new("/usr/bin/curl");
+        #[cfg(not(target_os = "macos"))]
+        let mut cmd = Command::new("curl");
+
+        cmd.args(["-sS", "-f", "-L", "--max-time", "15"]);
+        if !proxy.is_empty() {
+            cmd.args(["--proxy", &proxy]);
+        }
+        cmd.arg(&url_clone);
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
+
+        let output = cmd.output();
+        let elapsed_ms = start.elapsed().as_millis() as u64;
+
+        match output {
+            Ok(out) if out.status.success() => {
+                let body = String::from_utf8_lossy(&out.stdout).to_string();
+                let size = body.len() as u64;
+                let mut version = String::new();
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
+                    if let Some(v) = json.get("version").and_then(|v| v.as_str()) {
+                        version = v.to_string();
+                    }
+                }
+                ProbeResult { url: url_clone, ok: true, status: 200, size, time_ms: elapsed_ms, version, error: String::new() }
+            }
+            Ok(out) => {
+                let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                let code = out.status.code().unwrap_or(-1);
+                ProbeResult {
+                    url: url_clone, ok: false, status: code, size: 0, time_ms: elapsed_ms, version: String::new(),
+                    error: if stderr.is_empty() { format!("curl exit code {}", code) } else { stderr },
+                }
+            }
+            Err(e) => ProbeResult { url: url_clone, ok: false, status: 0, size: 0, time_ms: elapsed_ms, version: String::new(), error: e.to_string() },
+        }
+    });
+
+    handle.join().map_err(|_| "probe thread panicked".to_string())
+}
+
 // ── Shell environment resolution ─────────────────────────────────────
 // macOS .app bundles don't inherit shell env vars (ANTHROPIC_API_KEY, etc.)
 // We capture the full login shell environment once and apply it to child processes.
@@ -119,6 +361,25 @@ fn command_with_path(program: &str) -> Command {
         cmd.env(key, value);
     }
     cmd.env_remove("CLAUDECODE");
+
+    // Inject proxy env vars for child processes (Node.js sidecar).
+    // Node.js/undici supports HTTP CONNECT proxy via HTTP_PROXY/HTTPS_PROXY.
+    // Also set ALL_PROXY to SOCKS5 as fallback.
+    if let Ok(http) = PROXY_HTTP.lock() {
+        if !http.is_empty() {
+            cmd.env("HTTP_PROXY", http.as_str());
+            cmd.env("http_proxy", http.as_str());
+            cmd.env("HTTPS_PROXY", http.as_str());
+            cmd.env("https_proxy", http.as_str());
+        }
+    }
+    if let Ok(socks) = PROXY_SOCKS.lock() {
+        if !socks.is_empty() {
+            cmd.env("ALL_PROXY", socks.as_str());
+            cmd.env("all_proxy", socks.as_str());
+        }
+    }
+
     cmd
 }
 

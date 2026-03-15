@@ -42,7 +42,7 @@ const TOOL_ICONS: Record<string, React.ReactNode> = {
 };
 
 /** Extract a short filename from a full path */
-function shortPath(fullPath: string): string {
+export function shortPath(fullPath: string): string {
   const parts = fullPath.replace(/\\/g, "/").split("/");
   return parts.length > 2
     ? `.../${parts.slice(-2).join("/")}`
@@ -434,29 +434,77 @@ export default function ToolCallCard({ block, result, pendingInteraction, onResp
       {/* Expanded content */}
       {expanded && (
         <div className="px-3 pb-3 border-t border-border">
-          {/* Input */}
-          <div className="mt-2">
-            <div className="text-xs text-text-muted mb-1">{t("tool.input")}</div>
-            <pre className="text-xs bg-code-bg rounded p-2 overflow-x-auto max-h-48 overflow-y-auto">
-              {JSON.stringify(input, null, 2)}
-            </pre>
-          </div>
-
-          {/* Result */}
-          {resultText && (
+          {/* Edit diff view */}
+          {toolName === "Edit" ? (
             <div className="mt-2">
               <div className="text-xs text-text-muted mb-1">
-                {isError ? t("tool.error") : t("tool.output")}
+                {String(input.file_path || "")}
+                {input.replace_all ? <span className="ml-2 text-amber-400">(replace all)</span> : null}
               </div>
-              <pre
-                className={`text-xs rounded p-2 overflow-x-auto max-h-48 overflow-y-auto ${
-                  isError ? "bg-error/10 text-error" : "bg-code-bg"
-                }`}
-              >
-                {resultText.slice(0, 2000)}
-                {resultText.length > 2000 && `\n${t("tool.truncated")}`}
-              </pre>
+              <div className="text-xs rounded overflow-hidden border border-border">
+                {(input.old_string as string) && (
+                  <pre className="bg-red-500/10 p-2 overflow-x-auto max-h-36 overflow-y-auto whitespace-pre-wrap border-b border-border">
+                    {String(input.old_string).split("\n").map((line, i) => (
+                      <div key={i} className="text-red-400">
+                        <span className="select-none opacity-50 mr-2">-</span>{line}
+                      </div>
+                    ))}
+                  </pre>
+                )}
+                {(input.new_string as string) && (
+                  <pre className="bg-green-500/10 p-2 overflow-x-auto max-h-36 overflow-y-auto whitespace-pre-wrap">
+                    {String(input.new_string).split("\n").map((line, i) => (
+                      <div key={i} className="text-green-400">
+                        <span className="select-none opacity-50 mr-2">+</span>{line}
+                      </div>
+                    ))}
+                  </pre>
+                )}
+              </div>
+              {/* Result */}
+              {resultText && (
+                <div className="mt-2">
+                  <div className="text-xs text-text-muted mb-1">
+                    {isError ? t("tool.error") : t("tool.output")}
+                  </div>
+                  <pre
+                    className={`text-xs rounded p-2 overflow-x-auto max-h-32 overflow-y-auto ${
+                      isError ? "bg-error/10 text-error" : "bg-code-bg"
+                    }`}
+                  >
+                    {resultText.slice(0, 2000)}
+                    {resultText.length > 2000 && `\n${t("tool.truncated")}`}
+                  </pre>
+                </div>
+              )}
             </div>
+          ) : (
+            <>
+              {/* Input */}
+              <div className="mt-2">
+                <div className="text-xs text-text-muted mb-1">{t("tool.input")}</div>
+                <pre className="text-xs bg-code-bg rounded p-2 overflow-x-auto max-h-48 overflow-y-auto">
+                  {JSON.stringify(input, null, 2)}
+                </pre>
+              </div>
+
+              {/* Result */}
+              {resultText && (
+                <div className="mt-2">
+                  <div className="text-xs text-text-muted mb-1">
+                    {isError ? t("tool.error") : t("tool.output")}
+                  </div>
+                  <pre
+                    className={`text-xs rounded p-2 overflow-x-auto max-h-48 overflow-y-auto ${
+                      isError ? "bg-error/10 text-error" : "bg-code-bg"
+                    }`}
+                  >
+                    {resultText.slice(0, 2000)}
+                    {resultText.length > 2000 && `\n${t("tool.truncated")}`}
+                  </pre>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}

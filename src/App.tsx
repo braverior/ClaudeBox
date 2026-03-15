@@ -1,10 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import Sidebar from "./components/sidebar/Sidebar";
 import ChatPanel from "./components/chat/ChatPanel";
 import SettingsDialog from "./components/settings/SettingsDialog";
 import DebugPanel from "./components/debug/DebugPanel";
 import UpdateToast from "./components/UpdateToast";
-import { checkClaudeInstalled } from "./lib/claude-ipc";
+import { checkClaudeInstalled, applySystemProxy, emitDebug } from "./lib/claude-ipc";
 import {
   checkAndDownloadUpdate,
   applyUpdateAndRelaunch,
@@ -60,10 +60,40 @@ export default function App() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  // Check for updates on startup (silent background download)
-  useEffect(() => {
-    checkAndDownloadUpdate(setUpdateStatus);
+  // ── System proxy: detect on startup + poll every 30s for changes ──
+  const proxyInitialized = useRef(false);
+
+  const refreshProxy = useCallback(async () => {
+    try {
+      const { desc, changed } = await applySystemProxy();
+      if (!proxyInitialized.current) {
+        // First call — always log
+        proxyInitialized.current = true;
+        emitDebug("info", desc
+          ? `[proxy] System proxy detected: ${desc}`
+          : "[proxy] No system proxy found");
+      } else if (changed) {
+        // Subsequent calls — only log on change
+        emitDebug("info", desc
+          ? `[proxy] Proxy changed → ${desc}`
+          : "[proxy] Proxy removed (no system proxy)");
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      emitDebug("error", `[proxy] Detection failed: ${msg}`);
+    }
   }, []);
+
+  useEffect(() => {
+    if (!settingsLoaded || !chatLoaded) return;
+    // Initial detection, then start update check
+    refreshProxy().finally(() => {
+      checkAndDownloadUpdate(setUpdateStatus);
+    });
+    // Poll every 30s to pick up proxy changes (e.g. Clash on/off)
+    const id = setInterval(refreshProxy, 30_000);
+    return () => clearInterval(id);
+  }, [settingsLoaded, chatLoaded, refreshProxy]);
 
   // Show loading screen until stores are ready
   if (!settingsLoaded || !chatLoaded) {

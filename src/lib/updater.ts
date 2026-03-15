@@ -1,6 +1,6 @@
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
-import { emitDebug } from "./claude-ipc";
+import { emitDebug, probeUrl } from "./claude-ipc";
 
 export interface UpdateStatus {
   available: boolean;
@@ -53,42 +53,34 @@ function shortUrl(url: string): string {
 }
 
 /**
- * Probe each update endpoint independently and log the result.
- * Runs in parallel, does NOT affect the actual update flow — purely diagnostic.
+ * Probe each update endpoint using native curl (via Rust IPC).
+ * Bypasses WebView CORS and uses SOCKS5 proxy for reliability.
  */
 async function probeEndpoints(): Promise<void> {
-  log("info", `Probing ${UPDATE_ENDPOINTS.length} update endpoint(s)...`);
+  log("info", `Probing ${UPDATE_ENDPOINTS.length} update endpoint(s) via native curl...`);
 
   const results = await Promise.allSettled(
     UPDATE_ENDPOINTS.map(async (url) => {
-      const t = timer();
       const host = shortUrl(url);
       try {
-        const resp = await fetch(url, {
-          method: "GET",
-          signal: AbortSignal.timeout(15_000),
-        });
-        if (resp.ok) {
-          const body = await resp.text();
-          const size = body.length;
-          // Try to extract version from JSON response
-          let version = "";
-          try {
-            const json = JSON.parse(body);
-            if (json.version) version = ` → v${json.version}`;
-          } catch { /* not JSON, ok */ }
-          log("info", `  ✓ ${host} — HTTP ${resp.status}, ${size} bytes, ${t()}${version}`);
+        const result = await probeUrl(url);
+        if (result.ok) {
+          const versionInfo = result.version ? ` → v${result.version}` : "";
+          log("info", `  ✓ ${host} — OK, ${result.size} bytes, ${(result.time_ms / 1000).toFixed(1)}s${versionInfo}`);
+          return true;
         } else {
-          log("warn", `  ✗ ${host} — HTTP ${resp.status} ${resp.statusText}, ${t()}`);
+          log("warn", `  ✗ ${host} — ${result.error}, ${(result.time_ms / 1000).toFixed(1)}s`);
+          return false;
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        log("warn", `  ✗ ${host} — ${msg}, ${t()}`);
+        log("warn", `  ✗ ${host} — IPC error: ${msg}`);
+        return false;
       }
     })
   );
 
-  const ok = results.filter((r) => r.status === "fulfilled").length;
+  const ok = results.filter((r) => r.status === "fulfilled" && r.value === true).length;
   log("info", `Endpoint probe done: ${ok}/${UPDATE_ENDPOINTS.length} reachable`);
 }
 

@@ -82,6 +82,7 @@ dependencies = [
  "base64 0.22.1",
  "libc",
  "log",
+ "reqwest",
  "serde",
  "serde_json",
  "tauri",

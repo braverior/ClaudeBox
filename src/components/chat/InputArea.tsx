@@ -332,7 +332,9 @@ export default function InputArea({
 }: InputAreaProps) {
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [confirmClear, setConfirmClear] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const confirmTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const t = useT();
 
   const handleAttach = useCallback(async () => {
@@ -483,13 +485,26 @@ export default function InputArea({
                 {onClearSession && (
                   <>
                     <button
-                      onClick={() => onClearSession()}
-                      className="flex items-center justify-center w-6 h-6 rounded-md text-xs
-                                 text-text-muted hover:text-text-primary hover:bg-bg-tertiary/50
-                                 transition-colors"
-                      title={t("chat.clearSession")}
+                      onClick={() => {
+                        if (confirmClear) {
+                          clearTimeout(confirmTimerRef.current);
+                          setConfirmClear(false);
+                          onClearSession();
+                        } else {
+                          setConfirmClear(true);
+                          confirmTimerRef.current = setTimeout(() => setConfirmClear(false), 3000);
+                        }
+                      }}
+                      className={`flex items-center justify-center gap-1 rounded-md text-xs px-1.5 py-0.5
+                                 transition-colors ${
+                                   confirmClear
+                                     ? "text-warning bg-warning/10 hover:bg-warning/20"
+                                     : "text-text-muted hover:text-text-primary hover:bg-bg-tertiary/50"
+                                 }`}
+                      title={confirmClear ? t("chat.clearSessionConfirm") : t("chat.clearSession")}
                     >
                       <Eraser size={12} className="flex-shrink-0" />
+                      {confirmClear && <span className="text-[11px]">?</span>}
                     </button>
                     <span className="text-border/40 mx-0.5 flex-shrink-0">|</span>
                   </>

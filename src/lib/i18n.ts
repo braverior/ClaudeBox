@@ -114,6 +114,9 @@ const en: TranslationDict = {
   "tool.truncated": "... (truncated)",
   "tool.askQuestion": "Question:",
   "tool.planApprove": "Ready to implement — approve plan?",
+  "tool.explorationSteps": "{count} exploration steps",
+  "tool.removed": "Removed",
+  "tool.added": "Added",
 
   // Update
   "update.downloading": "Downloading update v{version}...",
@@ -245,6 +248,9 @@ const zh: TranslationDict = {
   "tool.truncated": "...（已截断）",
   "tool.askQuestion": "提问：",
   "tool.planApprove": "计划已就绪 — 是否批准执行？",
+  "tool.explorationSteps": "{count} 个探索步骤",
+  "tool.removed": "移除",
+  "tool.added": "添加",
 
   // Update
   "update.downloading": "正在下载更新 v{version}...",

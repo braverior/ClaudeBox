@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useState } from "react";
+import React, { useEffect, useRef, useCallback, useState, useMemo, memo } from "react";
 import { useChatStore } from "../../stores/chatStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { sendMessage, stopSession, onStream, getGitBranch, sendResponse, clearSessionResume } from "../../lib/claude-ipc";
@@ -6,15 +6,173 @@ import { getCurrentWindow, PhysicalSize } from "@tauri-apps/api/window";
 import { useT } from "../../lib/i18n";
 import { startWindowDrag } from "../../lib/utils";
 import MessageBubble from "./MessageBubble";
+import ToolCallCard from "./ToolCallCard";
 import InputArea, { type Attachment } from "./InputArea";
 import TaskBoard from "./TaskBoard";
 import FileTree from "./FileTree";
 import FileViewer from "./FileViewer";
-import { Sparkles, FolderOpen, Terminal, GitBranch, PanelRightClose, PanelRight } from "lucide-react";
+import { Sparkles, FolderOpen, Terminal, GitBranch, PanelRightClose, PanelRight, Bot, ChevronDown, ChevronRight, Loader2, CheckCircle } from "lucide-react";
+import type { ChatMessage, ContentBlock } from "../../lib/stream-parser";
 
 interface ChatPanelProps {
   claudeAvailable: boolean;
 }
+
+// ── Agent run detection: groups Agent tool_use + all child messages ──
+
+interface AgentRun {
+  agentMsgIndex: number;
+  agentBlock: ContentBlock;
+  childIndices: number[]; // indices of messages that belong to this agent run
+}
+
+function detectAgentRuns(msgs: ChatMessage[]): { runs: Map<number, AgentRun>; hidden: Set<number> } {
+  const runs = new Map<number, AgentRun>();
+  const hidden = new Set<number>();
+
+  for (let i = 0; i < msgs.length; i++) {
+    const msg = msgs[i];
+    if (msg.role !== "assistant") continue;
+
+    const agentBlock = msg.content.find(
+      (b) => b.type === "tool_use" && b.name === "Agent"
+    );
+    if (!agentBlock?.id) continue;
+
+    // Collect all subsequent assistant/system messages until we find the Agent's tool_result
+    // Stop at user messages — they can't be Agent children
+    const childIndices: number[] = [];
+    for (let j = i + 1; j < msgs.length; j++) {
+      const child = msgs[j];
+      if (child.role === "user") break; // user messages are never Agent children
+      const hasAgentResult = child.content.some(
+        (b) => b.type === "tool_result" && b.tool_use_id === agentBlock.id
+      );
+      if (hasAgentResult) {
+        childIndices.push(j);
+        hidden.add(j);
+        break;
+      }
+      childIndices.push(j);
+      hidden.add(j);
+    }
+
+    if (childIndices.length > 0) {
+      runs.set(i, { agentMsgIndex: i, agentBlock, childIndices });
+    }
+  }
+
+  return { runs, hidden };
+}
+
+/** Collapsible container for an Agent tool call and all its cross-message children */
+const AgentRunContainer = memo(function AgentRunContainer({
+  agentBlock,
+  childMessages,
+  isStreaming,
+}: {
+  agentBlock: ContentBlock;
+  childMessages: ChatMessage[];
+  isStreaming: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const input = agentBlock.input || {};
+  const description = String(input.description || input.prompt || "Agent").slice(0, 60);
+
+  // Collect all tool_use blocks from children
+  const toolBlocks: ContentBlock[] = [];
+  const resultMap = new Map<string, ContentBlock>();
+
+  for (const msg of childMessages) {
+    for (const block of msg.content) {
+      if (block.type === "tool_use") {
+        toolBlocks.push(block);
+      } else if (block.type === "tool_result" && block.tool_use_id) {
+        resultMap.set(block.tool_use_id, block);
+      }
+    }
+  }
+
+  // Check if agent is done: either tool_result arrived, or session stopped (not streaming + no result)
+  const hasResult = childMessages.some((m) =>
+    m.content.some((b) => b.type === "tool_result" && b.tool_use_id === agentBlock.id)
+  );
+  const isDone = hasResult || !isStreaming;
+
+  // Find currently running tool
+  let runningLabel = "";
+  if (!isDone) {
+    for (let i = toolBlocks.length - 1; i >= 0; i--) {
+      const tb = toolBlocks[i];
+      if (tb.id && !resultMap.has(tb.id)) {
+        const name = tb.name || "Tool";
+        const inp = tb.input || {};
+        if (name === "Read") runningLabel = `Read: ${String(inp.file_path || "").split("/").pop()}`;
+        else if (name === "Bash") runningLabel = String(inp.description || "") || String(inp.command || "").slice(0, 40);
+        else if (name === "Glob") runningLabel = `Glob: ${String(inp.pattern || "")}`;
+        else if (name === "Grep") runningLabel = `Grep: ${String(inp.pattern || "")}`;
+        else runningLabel = name;
+        break;
+      }
+    }
+  }
+
+  return (
+    <div className="flex justify-start px-4 mb-0.5">
+      <div className="flex items-start gap-2.5 max-w-[90%] min-w-0">
+        <div className="flex-shrink-0 w-7" />
+        <div className="min-w-0 flex-1">
+          <div className="rounded-lg border border-border bg-tool-bg overflow-hidden">
+            <button
+              onClick={() => setExpanded(!expanded)}
+              className="flex items-center gap-2 w-full px-3 py-1.5 text-sm hover:bg-bg-secondary/50 transition-colors"
+            >
+              {expanded ? (
+                <ChevronDown size={12} className="text-text-muted flex-shrink-0" />
+              ) : (
+                <ChevronRight size={12} className="text-text-muted flex-shrink-0" />
+              )}
+              <span className="text-accent flex-shrink-0"><Bot size={14} /></span>
+              <span className="text-text-secondary text-xs text-left truncate">
+                Agent: {description}
+              </span>
+              {toolBlocks.length > 0 && (
+                <span className="text-text-muted text-[11px] flex-shrink-0 tabular-nums">
+                  {toolBlocks.length} tools
+                </span>
+              )}
+              <span className="flex-1" />
+              {runningLabel ? (
+                <span className="flex items-center gap-1 text-text-muted text-[11px] flex-shrink-0 max-w-[40%] truncate">
+                  <Loader2 size={11} className="animate-spin flex-shrink-0" />
+                  {runningLabel}
+                </span>
+              ) : isDone ? (
+                <CheckCircle size={13} className="text-success flex-shrink-0" />
+              ) : (
+                <Loader2 size={13} className="text-text-muted animate-spin flex-shrink-0" />
+              )}
+            </button>
+            {expanded && (
+              <div className="px-2 pb-2 space-y-1 border-t border-border pt-1">
+                {toolBlocks.map((block) => {
+                  const result = block.id ? resultMap.get(block.id) : undefined;
+                  return (
+                    <ToolCallCard
+                      key={block.id || `tool-${block.name}`}
+                      block={block}
+                      result={result}
+                    />
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+});
 
 export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
   const {
@@ -201,6 +359,12 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
     ? messages[currentSessionId] || []
     : [];
 
+  // Detect Agent runs that span multiple messages
+  const { runs: agentRuns, hidden: hiddenIndices } = useMemo(
+    () => detectAgentRuns(currentMessages),
+    [currentMessages]
+  );
+
   // Compute total tokens for the current turn (all assistant messages after last user message)
   const totalTokens = (() => {
     let tokens = 0;
@@ -306,6 +470,9 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
                     </div>
                   )}
                   {currentMessages.map((msg, i) => {
+                    // Skip messages that are part of an Agent run (rendered inside AgentRunContainer)
+                    if (hiddenIndices.has(i)) return null;
+
                     // Only show bot avatar on the first assistant message in a consecutive group
                     let showAvatar = true;
                     if (msg.role === "assistant" && i > 0) {
@@ -320,20 +487,33 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
                     const isLastAssistant =
                       msg.role === "assistant" &&
                       !currentMessages.slice(i + 1).some((m) => m.role === "assistant");
+
+                    // If this message starts an Agent run, render the container
+                    const agentRun = agentRuns.get(i);
+
                     return (
-                      <MessageBubble
-                        key={msg.id}
-                        message={msg}
-                        allMessages={currentMessages}
-                        messageIndex={i}
-                        showAvatar={showAvatar}
-                        isLastInTurn={isLastInTurn}
-                        isLastAssistant={isLastAssistant}
-                        totalTokens={totalTokens}
-                        streamStartTime={streamStartTime}
-                        pendingInteraction={isLastAssistant ? pendingInteraction : undefined}
-                        onRespond={isLastAssistant ? handleRespond : undefined}
-                      />
+                      <React.Fragment key={msg.id}>
+                        <MessageBubble
+                          message={msg}
+                          allMessages={currentMessages}
+                          messageIndex={i}
+                          showAvatar={showAvatar}
+                          isLastInTurn={!agentRun && isLastInTurn}
+                          isLastAssistant={isLastAssistant}
+                          totalTokens={totalTokens}
+                          streamStartTime={streamStartTime}
+                          pendingInteraction={isLastAssistant ? pendingInteraction : undefined}
+                          onRespond={isLastAssistant ? handleRespond : undefined}
+                          skipAgentBlockId={agentRun?.agentBlock.id}
+                        />
+                        {agentRun && (
+                          <AgentRunContainer
+                            agentBlock={agentRun.agentBlock}
+                            childMessages={agentRun.childIndices.map((j) => currentMessages[j])}
+                            isStreaming={isStreaming}
+                          />
+                        )}
+                      </React.Fragment>
                     );
                   })}
                 </div>

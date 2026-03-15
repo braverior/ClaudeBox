@@ -25,6 +25,8 @@ pub fn run() {
             claude::send_response,
             claude::stop_session,
             claude::clear_session_resume,
+            claude::apply_system_proxy,
+            claude::probe_url,
             claude::check_claude_installed,
             claude::check_model_available,
             claude::get_git_branch,

@@ -32,6 +32,36 @@ export async function clearSessionResume(sessionId: string): Promise<void> {
   return invoke("clear_session_resume", { sessionId });
 }
 
+/**
+ * Detect system proxy and apply as process env vars.
+ * Uses SOCKS5 for HTTPS (bypasses GFW TLS fingerprinting), HTTP for sidecar.
+ * Returns { desc, changed } — desc is empty if no proxy found,
+ * changed indicates whether config differs from last call.
+ */
+export interface ProxyStatus {
+  desc: string;
+  changed: boolean;
+}
+
+export async function applySystemProxy(): Promise<ProxyStatus> {
+  return invoke("apply_system_proxy");
+}
+
+/** Probe a URL using native curl (bypasses WebView CORS restrictions). */
+export interface ProbeResult {
+  url: string;
+  ok: boolean;
+  status: number;
+  size: number;
+  time_ms: number;
+  version: string;
+  error: string;
+}
+
+export async function probeUrl(url: string): Promise<ProbeResult> {
+  return invoke("probe_url", { url });
+}
+
 /** Send a response to the sidecar (user answer for AskUserQuestion, plan approval, etc.) */
 export async function sendResponse(
   sessionId: string,

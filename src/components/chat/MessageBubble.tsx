@@ -3,10 +3,10 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ChatMessage, ContentBlock, PendingInteraction } from "../../lib/stream-parser";
 import CodeBlock from "./CodeBlock";
-import ToolCallCard from "./ToolCallCard";
+import ToolCallCard, { shortPath } from "./ToolCallCard";
 import { formatTimeWithSeconds, formatDuration } from "../../lib/utils";
-import { useT } from "../../lib/i18n";
-import { User, Loader2, Brain, ChevronDown, ChevronRight, Info, FileCode2, FileText, Image, FileType, Terminal, Globe, Settings2, Rocket, Sparkles } from "lucide-react";
+import { useT, type TFunction } from "../../lib/i18n";
+import { User, Loader2, Brain, ChevronDown, ChevronRight, Info, FileCode2, FileText, Image, FileType, Terminal, Globe, Settings2, Rocket, Sparkles, Layers, CheckCircle } from "lucide-react";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import type { ComponentPropsWithoutRef } from "react";
 
@@ -133,6 +133,186 @@ const ThinkingBlock = memo(function ThinkingBlock({
 /** Memoized tool call — only re-renders if inputs change */
 const MemoToolCallCard = memo(ToolCallCard);
 
+// ── Exploration tool grouping ────────────────────────────────────────
+// Agent tool calls become collapsible containers for all their children.
+// Consecutive read-only tool calls are also collapsed when 2+ in a row.
+
+const EXPLORATION_TOOLS = new Set(["Read", "Glob", "Grep", "Bash", "WebFetch", "WebSearch"]);
+const EXPLORATION_GROUP_THRESHOLD = 2;
+
+type GroupItem = { block: ContentBlock; blockIndex: number };
+type RenderItem =
+  | { kind: "single"; block: ContentBlock; blockIndex: number }
+  | { kind: "group"; items: GroupItem[] };
+
+function groupBlocks(blocks: ContentBlock[]): RenderItem[] {
+  const result: RenderItem[] = [];
+  let i = 0;
+
+  while (i < blocks.length) {
+    const block = blocks[i];
+
+    // ── Consecutive exploration tool_use blocks
+    if (block.type === "tool_use" && EXPLORATION_TOOLS.has(block.name || "")) {
+      const group: GroupItem[] = [];
+      let j = i;
+      while (j < blocks.length) {
+        const b = blocks[j];
+        if (b.type === "tool_use" && EXPLORATION_TOOLS.has(b.name || "")) {
+          group.push({ block: b, blockIndex: j });
+          j++;
+        } else if (b.type === "tool_result" || b.type === "thinking") {
+          j++; // skip, don't break
+        } else if (b.type === "text") {
+          // Peek ahead: if there's another exploration tool after this text, absorb it
+          let k = j + 1;
+          while (k < blocks.length && (blocks[k].type === "tool_result" || blocks[k].type === "thinking")) k++;
+          if (k < blocks.length && blocks[k].type === "tool_use" && EXPLORATION_TOOLS.has(blocks[k].name || "")) {
+            j++; // absorb the text block
+          } else {
+            break; // text block not followed by exploration — stop group
+          }
+        } else {
+          break;
+        }
+      }
+      if (group.length >= EXPLORATION_GROUP_THRESHOLD) {
+        result.push({ kind: "group", items: group });
+      } else {
+        for (const item of group) {
+          result.push({ kind: "single", block: item.block, blockIndex: item.blockIndex });
+        }
+      }
+      i = j;
+      continue;
+    }
+
+    // ── Skip standalone tool_result (rendered inside ToolCallCard)
+    if (block.type === "tool_result") {
+      i++;
+      continue;
+    }
+
+    // ── Everything else: single block
+    result.push({ kind: "single", block, blockIndex: i });
+    i++;
+  }
+
+  return result;
+}
+
+/** Build a short description of what an exploration tool is doing */
+function toolShortLabel(block: ContentBlock): string {
+  const name = block.name || "";
+  const input = block.input || {};
+  if (name === "Read") {
+    const fp = String(input.file_path || "");
+    return fp.split("/").pop() || fp;
+  }
+  if (name === "Bash") {
+    return String(input.description || "") || String(input.command || "").slice(0, 30);
+  }
+  if (name === "Glob") return String(input.pattern || "");
+  if (name === "Grep") return String(input.pattern || "");
+  if (name === "WebFetch") return String(input.url || "").replace(/^https?:\/\//, "").slice(0, 30);
+  if (name === "WebSearch") return String(input.query || "");
+  return name;
+}
+
+/** Find the currently running tool label in a list of items */
+function findRunningLabel(items: GroupItem[], findResult: (id: string) => ContentBlock | undefined): string {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const { block } = items[i];
+    if (block.id && !findResult(block.id)) {
+      const name = block.name || "Tool";
+      const input = block.input || {};
+      if (name === "Read") return `Read: ${shortPath(String(input.file_path || ""))}`;
+      if (name === "Bash") {
+        const desc = String(input.description || "");
+        const cmd = String(input.command || "").trim();
+        return desc || (cmd.length > 40 ? cmd.slice(0, 40) + "..." : cmd) || "Bash";
+      }
+      if (name === "Glob") return `Glob: ${String(input.pattern || "")}`;
+      if (name === "Grep") return `Grep: ${String(input.pattern || "")}`;
+      if (name === "WebFetch" || name === "WebSearch") return `${name}: ${String(input.url || input.query || "")}`;
+      if (name === "Agent") return String(input.description || input.prompt || "").slice(0, 40);
+      return name;
+    }
+  }
+  return "";
+}
+
+/** Collapsible group of exploration tool calls (standalone, no Agent parent) */
+const ExplorationGroup = memo(function ExplorationGroup({
+  items,
+  findToolResult,
+  t,
+}: {
+  items: GroupItem[];
+  findToolResult: (id: string) => ContentBlock | undefined;
+  t: TFunction;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  const labels: string[] = [];
+  for (const { block } of items) {
+    const lbl = toolShortLabel(block);
+    if (lbl && !labels.includes(lbl)) {
+      labels.push(lbl);
+      if (labels.length >= 3) break;
+    }
+  }
+  const remaining = items.length - labels.length;
+  let summaryDetail = labels.join(", ");
+  if (remaining > 0) summaryDetail += ` +${remaining}`;
+
+  const runningLabel = findRunningLabel(items, findToolResult);
+
+  return (
+    <div className="rounded-lg border border-border bg-tool-bg overflow-hidden">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-2 w-full px-3 py-1.5 text-sm hover:bg-bg-secondary/50 transition-colors"
+      >
+        {expanded ? (
+          <ChevronDown size={12} className="text-text-muted flex-shrink-0" />
+        ) : (
+          <ChevronRight size={12} className="text-text-muted flex-shrink-0" />
+        )}
+        <Layers size={14} className="text-accent flex-shrink-0" />
+        <span className="text-text-secondary text-xs flex-1 text-left truncate">
+          {t("tool.explorationSteps", { count: String(items.length) })}
+          {summaryDetail && (
+            <span className="text-text-muted ml-1.5">— {summaryDetail}</span>
+          )}
+        </span>
+        {runningLabel ? (
+          <span className="flex items-center gap-1 text-text-muted text-[11px] flex-shrink-0 max-w-[40%] truncate">
+            <Loader2 size={11} className="animate-spin flex-shrink-0" />
+            {runningLabel}
+          </span>
+        ) : (
+          <CheckCircle size={13} className="text-success flex-shrink-0" />
+        )}
+      </button>
+      {expanded && (
+        <div className="px-2 pb-2 space-y-1 border-t border-border pt-1">
+          {items.map(({ block }) => {
+            const result = block.id ? findToolResult(block.id) : undefined;
+            return (
+              <MemoToolCallCard
+                key={block.id || `tool-${block.name}`}
+                block={block}
+                result={result}
+              />
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+});
+
 interface MessageBubbleProps {
   message: ChatMessage;
   allMessages: ChatMessage[];
@@ -151,6 +331,8 @@ interface MessageBubbleProps {
   pendingInteraction?: PendingInteraction | null;
   /** Callback when user responds to an interactive tool */
   onRespond?: (response: Record<string, unknown>) => void;
+  /** If set, skip rendering this Agent tool_use block (rendered by AgentRunContainer instead) */
+  skipAgentBlockId?: string;
 }
 
 export default function MessageBubble({
@@ -164,6 +346,7 @@ export default function MessageBubble({
   streamStartTime,
   pendingInteraction,
   onRespond,
+  skipAgentBlockId,
 }: MessageBubbleProps) {
   const isUser = message.role === "user";
   const t = useT();
@@ -336,7 +519,20 @@ export default function MessageBubble({
           <div className="flex-shrink-0 w-7" />
         )}
         <div className="min-w-0 flex-1 space-y-1">
-          {blocks.map((block, i) => {
+          {groupBlocks(blocks).map((item, ri) => {
+            if (item.kind === "group") {
+              return (
+                <ExplorationGroup
+                  key={`group-${ri}`}
+                  items={item.items}
+                  findToolResult={findToolResult}
+                  t={t}
+                />
+              );
+            }
+
+            const block = item.block;
+            const i = item.blockIndex;
             const key = block.id || `${block.type}-${i}`;
             const isLastBlock = i === totalBlocks - 1;
 
@@ -359,6 +555,8 @@ export default function MessageBubble({
             }
 
             if (block.type === "tool_use") {
+              // Skip Agent blocks that are rendered by AgentRunContainer
+              if (block.id === skipAgentBlockId) return null;
               const result = block.id ? findToolResult(block.id) : undefined;
               // Pass interactive props only to the last tool_use block that matches
               const isInteractiveTool =
