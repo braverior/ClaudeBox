@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { X, CheckCircle, XCircle, Loader2, ScrollText, Plus, Trash2, Copy, Check } from "lucide-react";
 import { useSettingsStore } from "../../stores/settingsStore";
-import { checkClaudeInstalled } from "../../lib/claude-ipc";
+import { checkClaudeInstalled, checkModelAvailable } from "../../lib/claude-ipc";
 import { useT } from "../../lib/i18n";
 
 function getInstallInstructions(): { platform: string; command: string; note: string } {
@@ -75,6 +75,40 @@ export default function SettingsDialog({
   const [claudeError, setClaudeError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const [modelInput, setModelInput] = useState("");
+  const [modelChecking, setModelChecking] = useState(false);
+  const [modelError, setModelError] = useState<string | null>(null);
+
+  const addModel = async () => {
+    const trimmed = modelInput.trim();
+    if (!trimmed || settings.models.includes(trimmed)) return;
+
+    setModelError(null);
+    setModelChecking(true);
+    try {
+      await checkModelAvailable(
+        trimmed,
+        settings.apiKey || undefined,
+        settings.baseUrl || undefined,
+      );
+      // Model is valid — add it
+      const newModels = [...settings.models, trimmed];
+      updateSettings({ models: newModels, model: trimmed });
+      setModelInput("");
+    } catch (err) {
+      const reason = String(err);
+      if (reason.includes("no_api_key")) {
+        // No API key — add without validation
+        const newModels = [...settings.models, trimmed];
+        updateSettings({ models: newModels, model: trimmed });
+        setModelInput("");
+        setModelError(t("settings.modelNoApiKey"));
+      } else {
+        setModelError(t("settings.modelUnavailable", { reason }));
+      }
+    } finally {
+      setModelChecking(false);
+    }
+  };
 
   const checkClaude = async () => {
     setChecking(true);
@@ -185,41 +219,47 @@ export default function SettingsDialog({
               <input
                 type="text"
                 value={modelInput}
-                onChange={(e) => setModelInput(e.target.value)}
+                onChange={(e) => {
+                  setModelInput(e.target.value);
+                  setModelError(null);
+                }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     e.preventDefault();
-                    const trimmed = modelInput.trim();
-                    if (trimmed && !settings.models.includes(trimmed)) {
-                      const newModels = [...settings.models, trimmed];
-                      updateSettings({ models: newModels, model: trimmed });
-                      setModelInput("");
-                    }
+                    addModel();
                   }
                 }}
                 placeholder="e.g. claude-sonnet-4-20250514"
+                disabled={modelChecking}
                 className="flex-1 rounded-lg bg-input-bg border border-border px-3 py-2 text-sm
                            text-text-primary placeholder:text-text-muted
-                           focus:outline-none focus:ring-2 focus:ring-accent/50"
+                           focus:outline-none focus:ring-2 focus:ring-accent/50
+                           disabled:opacity-50"
               />
               <button
-                onClick={() => {
-                  const trimmed = modelInput.trim();
-                  if (trimmed && !settings.models.includes(trimmed)) {
-                    const newModels = [...settings.models, trimmed];
-                    updateSettings({ models: newModels, model: trimmed });
-                    setModelInput("");
-                  }
-                }}
-                disabled={!modelInput.trim() || settings.models.includes(modelInput.trim())}
+                onClick={addModel}
+                disabled={!modelInput.trim() || settings.models.includes(modelInput.trim()) || modelChecking}
                 className="px-3 py-2 rounded-lg bg-accent text-white hover:bg-accent-hover
                            transition-colors text-sm disabled:opacity-30 disabled:cursor-not-allowed
                            flex items-center gap-1"
               >
-                <Plus size={14} />
+                {modelChecking ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <Plus size={14} />
+                )}
                 {t("settings.add")}
               </button>
             </div>
+            {modelChecking && (
+              <p className="text-xs text-text-muted mt-1 flex items-center gap-1">
+                <Loader2 size={10} className="animate-spin" />
+                {t("settings.modelChecking")}
+              </p>
+            )}
+            {modelError && (
+              <p className="text-xs text-error mt-1">{modelError}</p>
+            )}
             {settings.models.length > 0 && (
               <div className="mt-2 space-y-1">
                 {settings.models.map((m) => (
@@ -255,25 +295,6 @@ export default function SettingsDialog({
             <p className="text-xs text-text-muted mt-1">
               {t("settings.modelsHint")}
             </p>
-          </div>
-
-          {/* Default Permission Mode */}
-          <div>
-            <label className="text-sm font-medium text-text-primary block mb-1.5">
-              {t("settings.permissionMode")}
-            </label>
-            <select
-              value={settings.permissionMode}
-              onChange={(e) =>
-                updateSettings({ permissionMode: e.target.value })
-              }
-              className="w-full rounded-lg bg-input-bg border border-border px-3 py-2 text-sm
-                         text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/50"
-            >
-              <option value="">{t("settings.modeDefault")}</option>
-              <option value="auto">{t("settings.modeAuto")}</option>
-              <option value="plan">{t("settings.modePlan")}</option>
-            </select>
           </div>
 
           {/* API Key */}

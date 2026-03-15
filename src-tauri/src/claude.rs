@@ -302,6 +302,82 @@ pub async fn check_claude_installed(claude_path: Option<String>) -> Result<Strin
     }
 }
 
+/// Check whether a model ID is available by making a minimal API call.
+/// Uses curl to POST to the Anthropic Messages API with max_tokens=1.
+/// Returns Ok(()) if model is valid, Err(reason) otherwise.
+#[tauri::command]
+pub async fn check_model_available(
+    model: String,
+    api_key: Option<String>,
+    base_url: Option<String>,
+) -> Result<(), String> {
+    let key = api_key
+        .filter(|s| !s.is_empty())
+        .or_else(|| get_shell_env().get("ANTHROPIC_API_KEY").cloned())
+        .ok_or("no_api_key")?;
+
+    let url = base_url
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "https://api.anthropic.com".to_string());
+    let endpoint = format!("{}/v1/messages", url.trim_end_matches('/'));
+
+    let body = serde_json::json!({
+        "model": model,
+        "max_tokens": 1,
+        "messages": [{"role": "user", "content": "hi"}]
+    });
+
+    let key_header = format!("x-api-key: {}", key);
+    let body_str = body.to_string();
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let result = command_with_path("curl")
+            .args([
+                "-s", "-w", "\n%{http_code}",
+                "-H", &key_header,
+                "-H", "anthropic-version: 2023-06-01",
+                "-H", "content-type: application/json",
+                "-d", &body_str,
+                &endpoint,
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output();
+        let _ = tx.send(result);
+    });
+
+    match rx.recv_timeout(std::time::Duration::from_secs(15)) {
+        Ok(Ok(output)) => {
+            let text = String::from_utf8_lossy(&output.stdout);
+            let text = text.trim();
+            // Last line is the HTTP status code (from -w '%{http_code}')
+            let (body_part, status_str) = match text.rfind('\n') {
+                Some(pos) => (&text[..pos], text[pos + 1..].trim()),
+                None => ("", text),
+            };
+            match status_str {
+                "200" => Ok(()),
+                _ => {
+                    // Try to parse error message from response body
+                    if let Ok(err_json) = serde_json::from_str::<serde_json::Value>(body_part) {
+                        if let Some(msg) = err_json
+                            .get("error")
+                            .and_then(|e| e.get("message"))
+                            .and_then(|m| m.as_str())
+                        {
+                            return Err(msg.to_string());
+                        }
+                    }
+                    Err(format!("API returned HTTP {}", status_str))
+                }
+            }
+        }
+        Ok(Err(e)) => Err(format!("Failed to check model: {}", e)),
+        Err(_) => Err("Model check timed out (15s)".to_string()),
+    }
+}
+
 /// Clear the in-memory resume session ID for a given session.
 /// Called by frontend when user starts a new conversation to prevent
 /// the fallback HashMap from re-attaching the old resume ID.

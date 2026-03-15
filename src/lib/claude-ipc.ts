@@ -50,6 +50,19 @@ export async function checkClaudeInstalled(
   return invoke("check_claude_installed", { claudePath: claudePath ?? null });
 }
 
+/** Check if a model is available by making a minimal API call */
+export async function checkModelAvailable(
+  model: string,
+  apiKey?: string,
+  baseUrl?: string,
+): Promise<void> {
+  return invoke("check_model_available", {
+    model,
+    apiKey: apiKey ?? null,
+    baseUrl: baseUrl ?? null,
+  });
+}
+
 /** Get current git branch for a directory */
 export async function getGitBranch(cwd: string): Promise<string> {
   return invoke("get_git_branch", { cwd });
