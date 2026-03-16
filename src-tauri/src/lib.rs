@@ -11,6 +11,9 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .manage(ProcessManager::new())
         .setup(|app| {
+            // Clean up stale clipboard images from previous sessions
+            claude::cleanup_old_tmp_images();
+
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
@@ -37,6 +40,7 @@ pub fn run() {
             claude::list_dir,
             claude::read_file,
             claude::read_image_base64,
+            claude::save_clipboard_image,
             claude::storage_read,
             claude::storage_write,
             claude::storage_remove,

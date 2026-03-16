@@ -12,7 +12,7 @@ import TaskBoard from "./TaskBoard";
 import FileTree from "./FileTree";
 import FileViewer from "./FileViewer";
 import { Sparkles, FolderOpen, Terminal, GitBranch, PanelRightClose, PanelRight, ChevronDown, ChevronRight, Loader2, CheckCircle, Check } from "lucide-react";
-import type { ChatMessage, ContentBlock } from "../../lib/stream-parser";
+import type { ChatMessage, ContentBlock, PendingInteraction } from "../../lib/stream-parser";
 
 interface ChatPanelProps {
   claudeAvailable: boolean;
@@ -55,8 +55,14 @@ function detectAgentRuns(msgs: ChatMessage[]): { runs: Map<number, AgentRun>; hi
       if (child.role === "user") break;
 
       if (hasResult) {
-        const childHasToolUse = child.content.some((b) => b.type === "tool_use");
+        const INTERACTIVE_TOOLS = new Set(["ExitPlanMode", "AskUserQuestion"]);
+        const toolUseBlocks = child.content.filter((b) => b.type === "tool_use");
+        const childHasToolUse = toolUseBlocks.length > 0;
         if (!childHasToolUse) break; // parent's continuation (text/thinking only)
+        // If the only tool_use blocks are interactive tools (ExitPlanMode / AskUserQuestion),
+        // this message belongs to the parent, not the sub-agent — stop collecting.
+        const allInteractive = toolUseBlocks.every((b) => INTERACTIVE_TOOLS.has(b.name || ""));
+        if (allInteractive) break;
       }
 
       childIndices.push(j);
@@ -89,11 +95,15 @@ const AgentRunContainer = memo(function AgentRunContainer({
   childMessages,
   isStreaming,
   hasResult,
+  pendingInteraction,
+  onRespond,
 }: {
   agentBlock: ContentBlock;
   childMessages: ChatMessage[];
   isStreaming: boolean;
   hasResult: boolean;
+  pendingInteraction?: PendingInteraction | null;
+  onRespond?: (response: Record<string, unknown>) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const t = useT();
@@ -114,13 +124,26 @@ const AgentRunContainer = memo(function AgentRunContainer({
     }
   }
 
+  // Separate interactive tools (AskUserQuestion / ExitPlanMode) that are still pending (no result)
+  const interactiveBlocks: ContentBlock[] = [];
+  const regularBlocks: ContentBlock[] = [];
+  for (const block of toolBlocks) {
+    const isInteractive = block.name === "AskUserQuestion" || block.name === "ExitPlanMode";
+    const hasPendingResult = block.id ? resultMap.has(block.id) : true;
+    if (isInteractive && !hasPendingResult) {
+      interactiveBlocks.push(block);
+    } else {
+      regularBlocks.push(block);
+    }
+  }
+
   const isDone = hasResult || !isStreaming;
 
-  // Find currently running tool
+  // Find currently running tool (skip interactive ones — they're rendered outside)
   let runningLabel = "";
   if (!isDone) {
-    for (let i = toolBlocks.length - 1; i >= 0; i--) {
-      const tb = toolBlocks[i];
+    for (let i = regularBlocks.length - 1; i >= 0; i--) {
+      const tb = regularBlocks[i];
       if (tb.id && !resultMap.has(tb.id)) {
         const name = tb.name || "Tool";
         const inp = tb.input || {};
@@ -137,69 +160,87 @@ const AgentRunContainer = memo(function AgentRunContainer({
   const breakdown = toolBlocks.length > 0 ? toolBreakdown(toolBlocks) : "";
 
   return (
-    <div className="flex justify-start px-4 mb-0.5">
-      <div className="flex items-start gap-2.5 max-w-[90%] min-w-0">
-        <div className="flex-shrink-0 w-7" />
-        <div className="min-w-0 flex-1">
-          <div className="rounded-lg border border-border bg-tool-bg overflow-hidden">
-            <button
-              onClick={() => setExpanded(!expanded)}
-              className="flex items-center gap-2 w-full px-3 py-1.5 text-sm hover:bg-bg-secondary/50 transition-colors"
-            >
-              {expanded ? (
-                <ChevronDown size={12} className="text-text-muted flex-shrink-0" />
-              ) : (
-                <ChevronRight size={12} className="text-text-muted flex-shrink-0" />
+    <>
+      <div className="flex justify-start px-4 mb-0.5">
+        <div className="flex items-start gap-2.5 max-w-[90%] min-w-0">
+          <div className="flex-shrink-0 w-7" />
+          <div className="min-w-0 flex-1">
+            <div className="rounded-lg border border-border bg-tool-bg overflow-hidden">
+              <button
+                onClick={() => setExpanded(!expanded)}
+                className="flex items-center gap-2 w-full px-3 py-1.5 text-sm hover:bg-bg-secondary/50 transition-colors"
+              >
+                {expanded ? (
+                  <ChevronDown size={12} className="text-text-muted flex-shrink-0" />
+                ) : (
+                  <ChevronRight size={12} className="text-text-muted flex-shrink-0" />
+                )}
+                {isDone ? (
+                  <>
+                    <CheckCircle size={13} className="text-success flex-shrink-0" />
+                    <span className="text-text-secondary text-xs text-left truncate">
+                      {description}
+                    </span>
+                    {breakdown && (
+                      <span className="text-text-muted text-[11px] flex-shrink-0">
+                        {breakdown}
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <Loader2 size={13} className="animate-spin text-accent flex-shrink-0" />
+                    <span className="text-text-secondary text-xs text-left truncate">
+                      {runningLabel || description}
+                    </span>
+                    {breakdown && (
+                      <span className="text-text-muted text-[11px] flex-shrink-0">
+                        {breakdown}
+                      </span>
+                    )}
+                    {!expanded && interactiveBlocks.length === 0 && (
+                      <span className="text-text-muted/50 text-[11px] flex-shrink-0">
+                        {t("tool.clickToExpand")}
+                      </span>
+                    )}
+                  </>
+                )}
+              </button>
+              {expanded && (
+                <div className="px-2 pb-2 space-y-1 border-t border-border pt-1">
+                  {regularBlocks.map((block) => {
+                    const result = block.id ? resultMap.get(block.id) : undefined;
+                    return (
+                      <ToolCallCard
+                        key={block.id || `tool-${block.name}`}
+                        block={block}
+                        result={result}
+                      />
+                    );
+                  })}
+                </div>
               )}
-              {isDone ? (
-                <>
-                  <CheckCircle size={13} className="text-success flex-shrink-0" />
-                  <span className="text-text-secondary text-xs text-left truncate">
-                    {description}
-                  </span>
-                  {breakdown && (
-                    <span className="text-text-muted text-[11px] flex-shrink-0">
-                      {breakdown}
-                    </span>
-                  )}
-                </>
-              ) : (
-                <>
-                  <Loader2 size={13} className="animate-spin text-accent flex-shrink-0" />
-                  <span className="text-text-secondary text-xs text-left truncate">
-                    {runningLabel || description}
-                  </span>
-                  {breakdown && (
-                    <span className="text-text-muted text-[11px] flex-shrink-0">
-                      {breakdown}
-                    </span>
-                  )}
-                  {!expanded && (
-                    <span className="text-text-muted/50 text-[11px] flex-shrink-0">
-                      {t("tool.clickToExpand")}
-                    </span>
-                  )}
-                </>
-              )}
-            </button>
-            {expanded && (
-              <div className="px-2 pb-2 space-y-1 border-t border-border pt-1">
-                {toolBlocks.map((block) => {
-                  const result = block.id ? resultMap.get(block.id) : undefined;
-                  return (
-                    <ToolCallCard
-                      key={block.id || `tool-${block.name}`}
-                      block={block}
-                      result={result}
-                    />
-                  );
-                })}
-              </div>
-            )}
+            </div>
           </div>
         </div>
       </div>
-    </div>
+      {/* Render pending interactive tools OUTSIDE the collapsible container */}
+      {interactiveBlocks.map((block) => (
+        <div key={block.id || `interactive-${block.name}`} className="flex justify-start px-4 mb-0.5">
+          <div className="flex items-start gap-2.5 max-w-[90%] min-w-0">
+            <div className="flex-shrink-0 w-7" />
+            <div className="min-w-0 flex-1">
+              <ToolCallCard
+                block={block}
+                result={undefined}
+                pendingInteraction={pendingInteraction}
+                onRespond={onRespond}
+              />
+            </div>
+          </div>
+        </div>
+      ))}
+    </>
   );
 });
 
@@ -648,6 +689,8 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
                             childMessages={agentRun.childIndices.map((j) => currentMessages[j])}
                             isStreaming={isStreaming}
                             hasResult={agentRun.hasResult}
+                            pendingInteraction={isLastAssistant ? pendingInteraction : undefined}
+                            onRespond={isLastAssistant ? handleRespond : undefined}
                           />
                         )}
                       </React.Fragment>

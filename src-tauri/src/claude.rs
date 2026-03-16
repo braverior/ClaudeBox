@@ -1115,6 +1115,66 @@ pub fn read_image_base64(path: String) -> Result<String, String> {
     Ok(format!("data:{};base64,{}", mime, b64))
 }
 
+// ── Clipboard image saving ───────────────────────────────────────────
+
+fn tmp_dir() -> std::path::PathBuf {
+    #[cfg(unix)]
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    #[cfg(windows)]
+    let home = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\".to_string());
+    std::path::PathBuf::from(home).join(".claudebox").join("tmp")
+}
+
+/// Save a clipboard image (raw base64, no data-URL prefix) to
+/// `~/.claudebox/tmp/<timestamp>-<sanitised_name>` and return the path.
+/// Limited to 10 MB.
+#[tauri::command]
+pub fn save_clipboard_image(data: String, filename: String) -> Result<String, String> {
+    use base64::Engine as _;
+
+    let dir = tmp_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create tmp dir: {e}"))?;
+
+    // Decode first so we can check the real size
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&data)
+        .map_err(|e| format!("Invalid base64: {e}"))?;
+    if bytes.len() > 10 * 1024 * 1024 {
+        return Err("Image too large (>10MB)".to_string());
+    }
+
+    // Sanitise filename & add a timestamp prefix for uniqueness
+    let safe: String = filename
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' })
+        .collect();
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let dest = dir.join(format!("{ts}-{safe}"));
+
+    std::fs::write(&dest, &bytes).map_err(|e| format!("Failed to write image: {e}"))?;
+    Ok(dest.to_string_lossy().into_owned())
+}
+
+/// Delete tmp images older than 24 h.  Called once at startup.
+pub fn cleanup_old_tmp_images() {
+    let dir = tmp_dir();
+    let Ok(entries) = std::fs::read_dir(&dir) else { return };
+    let cutoff = std::time::SystemTime::now()
+        - std::time::Duration::from_secs(24 * 3600);
+    for entry in entries.flatten() {
+        if let Ok(meta) = entry.metadata() {
+            if let Ok(modified) = meta.modified() {
+                if modified < cutoff {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+        }
+    }
+}
+
 // ── Persistent file storage ──────────────────────────────────────────
 // Stores data in ~/.claudebox/data/ — stable across app updates,
 // independent of Tauri WebView's localStorage (which has ~5MB limit

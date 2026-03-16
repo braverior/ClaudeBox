@@ -6,7 +6,7 @@ import {
   Loader2, SquareTerminal,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { readImageBase64, listGitBranches, checkoutGitBranch } from "../../lib/claude-ipc";
+import { readImageBase64, saveClipboardImage, listGitBranches, checkoutGitBranch } from "../../lib/claude-ipc";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { useT } from "../../lib/i18n";
 
@@ -497,6 +497,58 @@ export default function InputArea({
     setAttachments((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
+  /** Handle clipboard paste – intercept images, let text pass through */
+  const handlePaste = useCallback(async (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    const imageFiles: File[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.type.startsWith("image/")) {
+        const file = item.getAsFile();
+        if (file) imageFiles.push(file);
+      }
+    }
+
+    // No images → let the default text-paste behaviour through
+    if (imageFiles.length === 0) return;
+    e.preventDefault();
+
+    for (const file of imageFiles) {
+      try {
+        // Read the blob as raw base64
+        const buf = await file.arrayBuffer();
+        const bytes = new Uint8Array(buf);
+        let binary = "";
+        for (let j = 0; j < bytes.length; j++) {
+          binary += String.fromCharCode(bytes[j]);
+        }
+        const base64 = btoa(binary);
+
+        // Derive a sensible filename
+        const ext = file.type.split("/")[1]?.replace("jpeg", "jpg") || "png";
+        const name =
+          file.name && file.name !== "image.png"
+            ? file.name
+            : `clipboard-${Date.now()}.${ext}`;
+
+        // Persist to disk via Rust so the sidecar can read it by path
+        const savedPath = await saveClipboardImage(base64, name);
+
+        // Build a data-URL for the inline preview
+        const dataUrl = `data:${file.type};base64,${base64}`;
+
+        setAttachments((prev) => [
+          ...prev,
+          { path: savedPath, name, type: "image" as const, dataUrl },
+        ]);
+      } catch (err) {
+        console.error("Failed to paste image:", err);
+      }
+    }
+  }, []);
+
   const openAttachment = useCallback((att: Attachment) => {
     shellOpen(att.path).catch(() => {});
   }, []);
@@ -562,6 +614,7 @@ export default function InputArea({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             placeholder={t("input.placeholder")}
             rows={1}
             disabled={disabled}

@@ -157,6 +157,11 @@ export async function readImageBase64(path: string): Promise<string> {
   return invoke("read_image_base64", { path });
 }
 
+/** Save a clipboard image (raw base64) to a temp file, returns the full path */
+export async function saveClipboardImage(data: string, filename: string): Promise<string> {
+  return invoke("save_clipboard_image", { data, filename });
+}
+
 /**
  * Frontend-side debug event bus.
  * Used by modules like updater to emit logs visible in the Debug Panel.
