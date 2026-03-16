@@ -613,7 +613,7 @@ export default function InputArea({
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
-            placeholder={t("input.placeholder")}
+            placeholder={isStreaming ? "Claude Code 运行中..." : t("input.placeholder")}
             rows={1}
             disabled={disabled}
             className="w-full resize-none bg-transparent px-4 py-2

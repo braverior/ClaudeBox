@@ -39,6 +39,7 @@ pub fn run() {
             claude::open_in_terminal,
             claude::reveal_in_finder,
             claude::git_diff_files,
+            claude::git_diff,
             claude::list_dir,
             claude::read_file,
             claude::read_image_base64,

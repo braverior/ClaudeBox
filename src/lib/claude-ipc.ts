@@ -141,6 +141,11 @@ export async function gitDiffFiles(cwd: string): Promise<string[]> {
   return invoke("git_diff_files", { cwd });
 }
 
+/** Get the full git diff output (staged + unstaged) for a directory */
+export async function gitDiff(cwd: string): Promise<string> {
+  return invoke("git_diff", { cwd });
+}
+
 /** Open a directory in the system terminal */
 export async function openInTerminal(path: string): Promise<void> {
   return invoke("open_in_terminal", { path });

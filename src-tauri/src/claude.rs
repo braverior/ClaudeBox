@@ -1130,6 +1130,37 @@ pub fn git_diff_files(cwd: String) -> Result<Vec<String>, String> {
     Ok(files)
 }
 
+/// Get the full git diff (staged + unstaged) for a directory
+#[tauri::command]
+pub fn git_diff(cwd: String) -> Result<String, String> {
+    // staged changes
+    let staged = command_with_path("git")
+        .args(["diff", "--cached"])
+        .current_dir(&cwd)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .map_err(|e| e.to_string())?;
+    // unstaged changes
+    let unstaged = command_with_path("git")
+        .args(["diff"])
+        .current_dir(&cwd)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .map_err(|e| e.to_string())?;
+    let mut result = String::new();
+    let staged_str = String::from_utf8_lossy(&staged.stdout);
+    let unstaged_str = String::from_utf8_lossy(&unstaged.stdout);
+    if !staged_str.is_empty() {
+        result.push_str(&staged_str);
+    }
+    if !unstaged_str.is_empty() {
+        result.push_str(&unstaged_str);
+    }
+    Ok(result)
+}
+
 
 #[derive(Clone, Serialize)]
 pub struct DirEntry {

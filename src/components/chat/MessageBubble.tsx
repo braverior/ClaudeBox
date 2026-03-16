@@ -6,7 +6,7 @@ import CodeBlock from "./CodeBlock";
 import ToolCallCard, { shortPath } from "./ToolCallCard";
 import { formatTimeWithSeconds, formatDuration } from "../../lib/utils";
 import { useT, type TFunction } from "../../lib/i18n";
-import { User, Loader2, Brain, ChevronDown, ChevronRight, Info, FileCode2, FileText, Image, FileType, Terminal, Globe, Settings2, Rocket, Sparkles, Layers, CheckCircle, CircleStop } from "lucide-react";
+import { User, Loader2, Brain, ChevronDown, ChevronRight, Info, FileCode2, FileText, Image, FileType, Terminal, Globe, Settings2, Rocket, Sparkles, Layers, CheckCircle, CircleStop, Clock, Timer, Hash, DollarSign } from "lucide-react";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import type { ComponentPropsWithoutRef } from "react";
 
@@ -607,28 +607,33 @@ export default function MessageBubble({
           )}
 
           {/* Metadata — show on last assistant message of each completed turn */}
-          {isLastInTurn && !message.isStreaming && (
-            <div className="flex items-center gap-3 px-1 mt-1 mb-2 text-xs text-text-muted">
-              <span>{formatTimeWithSeconds(message.timestamp)}</span>
-              {/* Duration: from stored turnMeta (completed) or live calc (most recent) */}
-              {message.turnMeta && message.turnMeta.durationMs > 0 ? (
-                <span>{formatDuration(message.turnMeta.durationMs)}</span>
-              ) : isLastAssistant && streamStartTime ? (
-                <span>{formatDuration(Math.max(0, message.timestamp - streamStartTime))}</span>
-              ) : null}
-              {message.model && <span>{message.model}</span>}
-              {/* Tokens: from stored turnMeta (completed) or live calc (most recent) */}
-              {message.turnMeta && message.turnMeta.tokens > 0 ? (
-                <span>{message.turnMeta.tokens.toLocaleString()} tokens</span>
-              ) : isLastAssistant && totalTokens > 0 ? (
-                <span>{totalTokens.toLocaleString()} tokens</span>
-              ) : null}
-              {/* Cost from turnMeta */}
-              {message.turnMeta?.costUsd != null && message.turnMeta.costUsd > 0 && (
-                <span>${message.turnMeta.costUsd.toFixed(4)}</span>
-              )}
-            </div>
-          )}
+          {isLastInTurn && !message.isStreaming && (() => {
+            const duration = message.turnMeta && message.turnMeta.durationMs > 0
+              ? formatDuration(message.turnMeta.durationMs)
+              : isLastAssistant && streamStartTime
+                ? formatDuration(Math.max(0, message.timestamp - streamStartTime))
+                : null;
+            const tokens = message.turnMeta && message.turnMeta.tokens > 0
+              ? message.turnMeta.tokens
+              : isLastAssistant && totalTokens > 0 ? totalTokens : null;
+            const cost = message.turnMeta?.costUsd != null && message.turnMeta.costUsd > 0
+              ? message.turnMeta.costUsd : null;
+
+            const sep = <span className="text-text-muted/30">·</span>;
+
+            return (
+              <div className="flex items-center gap-1.5 px-1 mt-1.5 mb-2 text-[11px] text-text-muted/60 flex-wrap">
+                <span className="flex items-center gap-1">
+                  <Clock size={10} className="shrink-0" />
+                  {formatTimeWithSeconds(message.timestamp)}
+                </span>
+                {duration && <>{sep}<span className="flex items-center gap-1"><Timer size={10} className="shrink-0" />{duration}</span></>}
+                {message.model && <>{sep}<span className="px-1.5 py-px rounded bg-white/5 border border-white/8 font-mono text-[10px] text-text-muted/70">{message.model}</span></>}
+                {tokens != null && <>{sep}<span className="flex items-center gap-1"><Hash size={10} className="shrink-0" />{tokens.toLocaleString()} tokens</span></>}
+                {cost != null && <>{sep}<span className="flex items-center gap-1 text-emerald-400/60"><DollarSign size={10} className="shrink-0" />{cost.toFixed(4)}</span></>}
+              </div>
+            );
+          })()}
         </div>
       </div>
     </div>

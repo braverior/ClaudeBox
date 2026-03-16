@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { listDir, revealInFinder, type DirEntry } from "../../lib/claude-ipc";
+import { listDir, revealInFinder, gitDiff, type DirEntry } from "../../lib/claude-ipc";
 import { useT } from "../../lib/i18n";
 import {
   ChevronRight,
@@ -11,6 +11,8 @@ import {
   Image,
   File,
   RefreshCw,
+  GitBranch,
+  X,
 } from "lucide-react";
 
 // ── File icons ───────────────────────────────────────────────────────
@@ -45,7 +47,11 @@ interface ContextMenuState {
   entry: DirEntry;
 }
 
-function ContextMenu({ menu, onClose }: { menu: ContextMenuState; onClose: () => void }) {
+function ContextMenu({ menu, onClose, onShowDiff }: {
+  menu: ContextMenuState;
+  onClose: () => void;
+  onShowDiff: () => void;
+}) {
   const t = useT();
   const ref = useRef<HTMLDivElement>(null);
 
@@ -67,6 +73,11 @@ function ContextMenu({ menu, onClose }: { menu: ContextMenuState; onClose: () =>
     onClose();
   }, [menu.entry.path, onClose]);
 
+  const handleShowDiff = useCallback(() => {
+    onClose();
+    onShowDiff();
+  }, [onClose, onShowDiff]);
+
   return (
     <div
       ref={ref}
@@ -79,6 +90,90 @@ function ContextMenu({ menu, onClose }: { menu: ContextMenuState; onClose: () =>
       >
         {menu.entry.is_dir ? t("files.openInFinder") : t("files.revealInFinder")}
       </button>
+      <div className="my-1 border-t border-border/50" />
+      <button
+        onClick={handleShowDiff}
+        className="w-full text-left px-3 py-1.5 text-xs text-text-secondary hover:bg-accent/10 hover:text-text-primary transition-colors flex items-center gap-2"
+      >
+        <GitBranch size={11} />
+        查看全部 Diff
+      </button>
+    </div>
+  );
+}
+
+// ── DiffViewer Modal ──────────────────────────────────────────────────
+
+function DiffViewer({ rootPath, onClose }: { rootPath: string; onClose: () => void }) {
+  const [diff, setDiff] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    gitDiff(rootPath)
+      .then((d) => { setDiff(d); setLoading(false); })
+      .catch((e) => { setError(String(e)); setLoading(false); });
+  }, [rootPath]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div
+        className="relative flex flex-col bg-bg-primary border border-border rounded-xl shadow-2xl w-[800px] max-w-[90vw] h-[70vh]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
+          <div className="flex items-center gap-2 text-sm font-medium text-text-primary">
+            <GitBranch size={14} className="text-accent" />
+            Git Diff
+            <span className="text-xs text-text-muted font-normal ml-1">{rootPath.split("/").pop()}</span>
+          </div>
+          <button onClick={onClose} className="p-1 rounded hover:bg-bg-tertiary/50 text-text-muted hover:text-text-primary transition-colors">
+            <X size={14} />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-auto">
+          {loading && (
+            <div className="flex items-center gap-2 px-4 py-6 text-xs text-text-muted">
+              <RefreshCw size={12} className="animate-spin" /> 加载中...
+            </div>
+          )}
+          {error && (
+            <div className="px-4 py-4 text-xs text-red-400">{error}</div>
+          )}
+          {!loading && !error && (!diff || diff.trim() === "") && (
+            <div className="px-4 py-6 text-xs text-text-muted">没有未提交的改动</div>
+          )}
+          {!loading && !error && diff && diff.trim() !== "" && (
+            <pre className="text-[11px] leading-5 font-mono px-4 py-3 whitespace-pre">
+              {diff.split("\n").map((line, i) => {
+                const cls =
+                  line.startsWith("+++") || line.startsWith("---")
+                    ? "text-text-muted"
+                    : line.startsWith("+")
+                    ? "text-emerald-400"
+                    : line.startsWith("-")
+                    ? "text-red-400"
+                    : line.startsWith("@@")
+                    ? "text-blue-400"
+                    : line.startsWith("diff ") || line.startsWith("index ")
+                    ? "text-accent/80"
+                    : "text-text-secondary";
+                return <span key={i} className={`block ${cls}`}>{line || "\u00a0"}</span>;
+              })}
+            </pre>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -141,10 +236,12 @@ function TreeNode({
             {getFileIcon(entry.name)}
           </>
         )}
-        <span className="truncate flex-1">{entry.name}</span>
-        {isChanged && (
-          <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1" title="Uncommitted changes" />
-        )}
+        <span className="flex items-center gap-1 min-w-0 flex-1">
+          <span className="truncate">{entry.name}</span>
+          {isChanged && (
+            <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-emerald-400" title="Uncommitted changes" />
+          )}
+        </span>
       </button>
       {entry.is_dir && expanded && (
         <div>
@@ -181,6 +278,7 @@ export default function FileTree({ rootPath, changedFiles = new Set(), onFileSel
   const [entries, setEntries] = useState<DirEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [showDiff, setShowDiff] = useState(false);
   const t = useT();
 
   const loadRoot = useCallback(async () => {
@@ -196,7 +294,7 @@ export default function FileTree({ rootPath, changedFiles = new Set(), onFileSel
     e.preventDefault();
     e.stopPropagation();
     const x = Math.min(e.clientX, window.innerWidth - 180);
-    const y = Math.min(e.clientY, window.innerHeight - 60);
+    const y = Math.min(e.clientY, window.innerHeight - 100);
     setContextMenu({ x, y, entry });
   }, []);
 
@@ -222,7 +320,14 @@ export default function FileTree({ rootPath, changedFiles = new Set(), onFileSel
           ))
         )}
       </div>
-      {contextMenu && <ContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} />}
+      {contextMenu && (
+        <ContextMenu
+          menu={contextMenu}
+          onClose={() => setContextMenu(null)}
+          onShowDiff={() => setShowDiff(true)}
+        />
+      )}
+      {showDiff && <DiffViewer rootPath={rootPath} onClose={() => setShowDiff(false)} />}
     </div>
   );
 }
