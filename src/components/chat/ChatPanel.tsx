@@ -124,26 +124,25 @@ const AgentRunContainer = memo(function AgentRunContainer({
     }
   }
 
-  // Separate interactive tools (AskUserQuestion / ExitPlanMode) that are still pending (no result)
-  const interactiveBlocks: ContentBlock[] = [];
-  const regularBlocks: ContentBlock[] = [];
+  // Only search/read tools stay collapsed; everything else is elevated (shown outside)
+  const COLLAPSIBLE_TOOLS = new Set(["Read", "Glob", "Grep", "Bash"]);
+  const elevatedBlocks: ContentBlock[] = [];
+  const collapsibleBlocks: ContentBlock[] = [];
   for (const block of toolBlocks) {
-    const isInteractive = block.name === "AskUserQuestion" || block.name === "ExitPlanMode";
-    const hasPendingResult = block.id ? resultMap.has(block.id) : true;
-    if (isInteractive && !hasPendingResult) {
-      interactiveBlocks.push(block);
+    if (COLLAPSIBLE_TOOLS.has(block.name || "")) {
+      collapsibleBlocks.push(block);
     } else {
-      regularBlocks.push(block);
+      elevatedBlocks.push(block);
     }
   }
 
   const isDone = hasResult || !isStreaming;
 
-  // Find currently running tool (skip interactive ones — they're rendered outside)
+  // Find currently running tool in the collapsed section
   let runningLabel = "";
   if (!isDone) {
-    for (let i = regularBlocks.length - 1; i >= 0; i--) {
-      const tb = regularBlocks[i];
+    for (let i = collapsibleBlocks.length - 1; i >= 0; i--) {
+      const tb = collapsibleBlocks[i];
       if (tb.id && !resultMap.has(tb.id)) {
         const name = tb.name || "Tool";
         const inp = tb.input || {};
@@ -157,82 +156,85 @@ const AgentRunContainer = memo(function AgentRunContainer({
     }
   }
 
-  const breakdown = toolBlocks.length > 0 ? toolBreakdown(toolBlocks) : "";
+  const breakdown = collapsibleBlocks.length > 0 ? toolBreakdown(collapsibleBlocks) : "";
 
   return (
     <>
-      <div className="flex justify-start px-4 mb-0.5">
-        <div className="flex items-start gap-2.5 max-w-[90%] min-w-0">
-          <div className="flex-shrink-0 w-7" />
-          <div className="min-w-0 flex-1">
-            <div className="rounded-lg border border-border bg-tool-bg overflow-hidden">
-              <button
-                onClick={() => setExpanded(!expanded)}
-                className="flex items-center gap-2 w-full px-3 py-1.5 text-sm hover:bg-bg-secondary/50 transition-colors"
-              >
-                {expanded ? (
-                  <ChevronDown size={12} className="text-text-muted flex-shrink-0" />
-                ) : (
-                  <ChevronRight size={12} className="text-text-muted flex-shrink-0" />
+      {/* Collapsible section: only Read/Glob/Grep/Bash */}
+      {collapsibleBlocks.length > 0 && (
+        <div className="flex justify-start px-4 mb-0.5">
+          <div className="flex items-start gap-2.5 max-w-[90%] min-w-0">
+            <div className="flex-shrink-0 w-7" />
+            <div className="min-w-0 flex-1">
+              <div className="rounded-lg border border-border bg-tool-bg overflow-hidden">
+                <button
+                  onClick={() => setExpanded(!expanded)}
+                  className="flex items-center gap-2 w-full px-3 py-1.5 text-sm hover:bg-bg-secondary/50 transition-colors"
+                >
+                  {expanded ? (
+                    <ChevronDown size={12} className="text-text-muted flex-shrink-0" />
+                  ) : (
+                    <ChevronRight size={12} className="text-text-muted flex-shrink-0" />
+                  )}
+                  {isDone ? (
+                    <>
+                      <CheckCircle size={13} className="text-success flex-shrink-0" />
+                      <span className="text-text-secondary text-xs text-left truncate">
+                        {description}
+                      </span>
+                      {breakdown && (
+                        <span className="text-text-muted text-[11px] flex-shrink-0">
+                          {breakdown}
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <Loader2 size={13} className="animate-spin text-accent flex-shrink-0" />
+                      <span className="text-text-secondary text-xs text-left truncate">
+                        {runningLabel || description}
+                      </span>
+                      {breakdown && (
+                        <span className="text-text-muted text-[11px] flex-shrink-0">
+                          {breakdown}
+                        </span>
+                      )}
+                      {!expanded && elevatedBlocks.length === 0 && (
+                        <span className="text-text-muted/50 text-[11px] flex-shrink-0">
+                          {t("tool.clickToExpand")}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </button>
+                {expanded && (
+                  <div className="px-2 pb-2 space-y-1 border-t border-border pt-1">
+                    {collapsibleBlocks.map((block) => {
+                      const result = block.id ? resultMap.get(block.id) : undefined;
+                      return (
+                        <ToolCallCard
+                          key={block.id || `tool-${block.name}`}
+                          block={block}
+                          result={result}
+                        />
+                      );
+                    })}
+                  </div>
                 )}
-                {isDone ? (
-                  <>
-                    <CheckCircle size={13} className="text-success flex-shrink-0" />
-                    <span className="text-text-secondary text-xs text-left truncate">
-                      {description}
-                    </span>
-                    {breakdown && (
-                      <span className="text-text-muted text-[11px] flex-shrink-0">
-                        {breakdown}
-                      </span>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <Loader2 size={13} className="animate-spin text-accent flex-shrink-0" />
-                    <span className="text-text-secondary text-xs text-left truncate">
-                      {runningLabel || description}
-                    </span>
-                    {breakdown && (
-                      <span className="text-text-muted text-[11px] flex-shrink-0">
-                        {breakdown}
-                      </span>
-                    )}
-                    {!expanded && interactiveBlocks.length === 0 && (
-                      <span className="text-text-muted/50 text-[11px] flex-shrink-0">
-                        {t("tool.clickToExpand")}
-                      </span>
-                    )}
-                  </>
-                )}
-              </button>
-              {expanded && (
-                <div className="px-2 pb-2 space-y-1 border-t border-border pt-1">
-                  {regularBlocks.map((block) => {
-                    const result = block.id ? resultMap.get(block.id) : undefined;
-                    return (
-                      <ToolCallCard
-                        key={block.id || `tool-${block.name}`}
-                        block={block}
-                        result={result}
-                      />
-                    );
-                  })}
-                </div>
-              )}
+              </div>
             </div>
           </div>
         </div>
-      </div>
-      {/* Render pending interactive tools OUTSIDE the collapsible container */}
-      {interactiveBlocks.map((block) => (
-        <div key={block.id || `interactive-${block.name}`} className="flex justify-start px-4 mb-0.5">
+      )}
+      {/* Render elevated tools (write, interactive, etc.) OUTSIDE the collapsible container */}
+      {elevatedBlocks.map((block) => (
+        <div key={block.id || `elevated-${block.name}`} className="flex justify-start px-4 mb-0.5">
           <div className="flex items-start gap-2.5 max-w-[90%] min-w-0">
             <div className="flex-shrink-0 w-7" />
             <div className="min-w-0 flex-1">
               <ToolCallCard
                 block={block}
-                result={undefined}
+                result={block.id ? resultMap.get(block.id) : undefined}
                 pendingInteraction={pendingInteraction}
                 onRespond={onRespond}
               />
@@ -372,14 +374,15 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
   const isStreaming = currentSessionId ? !!streamingSessions[currentSessionId] : false;
   const [gitBranch, setGitBranch] = useState<string | null>(null);
   const [showFilePanel, setShowFilePanel] = useState(false);
-  const [openFilePath, setOpenFilePath] = useState<string | null>(null);
+  const [openFiles, setOpenFiles] = useState<string[]>([]);
+  const [activeFileIndex, setActiveFileIndex] = useState(0);
 
   const FILE_PANEL_WIDTH = 256; // w-64
 
   const toggleFilePanel = useCallback(async () => {
     const next = !showFilePanel;
     setShowFilePanel(next);
-    if (!next) setOpenFilePath(null);
+    if (!next) { setOpenFiles([]); setActiveFileIndex(0); }
     try {
       const win = getCurrentWindow();
       const size = await win.outerSize();
@@ -479,8 +482,9 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
   const handleStop = useCallback(async () => {
     if (currentSessionId) {
       try { await stopSession(currentSessionId); } catch { /* ignore */ }
+      addSystemMessage(currentSessionId, "__stopped__");
     }
-  }, [currentSessionId]);
+  }, [currentSessionId, addSystemMessage]);
 
   const handleModelChange = useCallback(
     (model: string) => {
@@ -627,11 +631,24 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
       <div className="flex-1 flex min-h-0">
         {/* Chat area */}
         <div className="flex-1 flex flex-col min-w-0">
-          {openFilePath ? (
-            /* File viewer overlay — covers entire chat area for maximum reading space */
+          {openFiles.length > 0 ? (
+            /* Tabbed file viewer — covers entire chat area for maximum reading space */
             <FileViewer
-              filePath={openFilePath}
-              onClose={() => setOpenFilePath(null)}
+              files={openFiles}
+              activeIndex={activeFileIndex}
+              onSelectTab={setActiveFileIndex}
+              onCloseTab={(index) => {
+                const next = openFiles.filter((_, i) => i !== index);
+                setOpenFiles(next);
+                if (next.length === 0) {
+                  setActiveFileIndex(0);
+                } else if (activeFileIndex >= next.length) {
+                  setActiveFileIndex(next.length - 1);
+                } else if (index < activeFileIndex) {
+                  setActiveFileIndex(activeFileIndex - 1);
+                }
+              }}
+              onCloseAll={() => { setOpenFiles([]); setActiveFileIndex(0); }}
             />
           ) : (
             <>
@@ -739,7 +756,15 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
         {/* File panel — tree only, viewer is shown in the chat area */}
         {showFilePanel && currentSession?.projectPath && (
           <div className="w-64 border-l border-border bg-bg-secondary flex-shrink-0">
-            <FileTree rootPath={currentSession.projectPath} onFileSelect={setOpenFilePath} />
+            <FileTree rootPath={currentSession.projectPath} onFileSelect={(path) => {
+              const existing = openFiles.indexOf(path);
+              if (existing >= 0) {
+                setActiveFileIndex(existing);
+              } else {
+                setOpenFiles((prev) => [...prev, path]);
+                setActiveFileIndex(openFiles.length);
+              }
+            }} />
           </div>
         )}
       </div>

@@ -1008,10 +1008,21 @@ pub fn open_in_browser(url: String) -> Result<(), String> {
 pub fn open_in_terminal(path: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        Command::new("open")
-            .args(["-a", "Terminal", &path])
-            .spawn()
-            .map_err(|e| e.to_string())?;
+        // Prefer iTerm2, fall back to Terminal.app
+        let terminals = ["iTerm", "Terminal"];
+        let mut launched = false;
+        for term in &terminals {
+            let result = Command::new("open")
+                .args(["-a", term, &path])
+                .spawn();
+            if result.is_ok() {
+                launched = true;
+                break;
+            }
+        }
+        if !launched {
+            return Err("No terminal emulator found".into());
+        }
     }
     #[cfg(target_os = "linux")]
     {

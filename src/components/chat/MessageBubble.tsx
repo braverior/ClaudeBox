@@ -6,7 +6,7 @@ import CodeBlock from "./CodeBlock";
 import ToolCallCard, { shortPath } from "./ToolCallCard";
 import { formatTimeWithSeconds, formatDuration } from "../../lib/utils";
 import { useT, type TFunction } from "../../lib/i18n";
-import { User, Loader2, Brain, ChevronDown, ChevronRight, Info, FileCode2, FileText, Image, FileType, Terminal, Globe, Settings2, Rocket, Sparkles, Layers, CheckCircle } from "lucide-react";
+import { User, Loader2, Brain, ChevronDown, ChevronRight, Info, FileCode2, FileText, Image, FileType, Terminal, Globe, Settings2, Rocket, Sparkles, Layers, CheckCircle, CircleStop } from "lucide-react";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import type { ComponentPropsWithoutRef } from "react";
 
@@ -137,7 +137,7 @@ const MemoToolCallCard = memo(ToolCallCard);
 // Agent tool calls become collapsible containers for all their children.
 // Consecutive read-only tool calls are also collapsed when 2+ in a row.
 
-const EXPLORATION_TOOLS = new Set(["Read", "Glob", "Grep", "Bash", "WebFetch", "WebSearch"]);
+const EXPLORATION_TOOLS = new Set(["Read", "Glob", "Grep", "Bash"]);
 const EXPLORATION_GROUP_THRESHOLD = 2;
 
 type GroupItem = { block: ContentBlock; blockIndex: number };
@@ -161,12 +161,12 @@ function groupBlocks(blocks: ContentBlock[]): RenderItem[] {
         if (b.type === "tool_use" && EXPLORATION_TOOLS.has(b.name || "")) {
           group.push({ block: b, blockIndex: j });
           j++;
-        } else if (b.type === "tool_result" || b.type === "thinking") {
+        } else if (b.type === "tool_result") {
           j++; // skip, don't break
         } else if (b.type === "text") {
           // Peek ahead: if there's another exploration tool after this text, absorb it
           let k = j + 1;
-          while (k < blocks.length && (blocks[k].type === "tool_result" || blocks[k].type === "thinking")) k++;
+          while (k < blocks.length && blocks[k].type === "tool_result") k++;
           if (k < blocks.length && blocks[k].type === "tool_use" && EXPLORATION_TOOLS.has(blocks[k].name || "")) {
             j++; // absorb the text block
           } else {
@@ -214,8 +214,6 @@ function toolShortLabel(block: ContentBlock): string {
   }
   if (name === "Glob") return String(input.pattern || "");
   if (name === "Grep") return String(input.pattern || "");
-  if (name === "WebFetch") return String(input.url || "").replace(/^https?:\/\//, "").slice(0, 30);
-  if (name === "WebSearch") return String(input.query || "");
   return name;
 }
 
@@ -450,6 +448,26 @@ export default function MessageBubble({
   if (message.role === "system") {
     const text = message.content[0]?.text || "";
     if (!text) return null;
+
+    // Special card for user-initiated stop
+    if (text === "__stopped__") {
+      return (
+        <div className="flex justify-start px-4 mb-1.5 mt-1">
+          <div className="flex items-start gap-2.5 max-w-[90%] min-w-0">
+            <div className="flex-shrink-0 w-7 h-7 rounded-lg bg-orange-500/10 flex items-center justify-center mt-0.5">
+              <CircleStop size={14} className="text-orange-400" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-orange-500/5 border border-orange-500/20">
+                <span className="text-xs text-orange-400">{t("chat.stoppedByUser")}</span>
+                <span className="text-[10px] text-text-muted">{formatTimeWithSeconds(message.timestamp)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="flex items-center justify-center gap-2 my-1 px-4">
         <Info size={12} className="text-text-muted flex-shrink-0" />

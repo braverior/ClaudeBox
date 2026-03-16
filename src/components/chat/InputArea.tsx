@@ -730,6 +730,7 @@ export default function InputArea({
                       title={t("input.openTerminal")}
                     >
                       <SquareTerminal size={13} />
+                      <span>{t("input.terminal")}</span>
                     </button>
                   </>
                 )}

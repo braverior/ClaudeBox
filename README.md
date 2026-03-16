@@ -33,19 +33,61 @@
 
 ClaudeBox wraps [Claude Code](https://docs.anthropic.com/en/docs/claude-code) in a lightweight native desktop app powered by [Tauri v2](https://v2.tauri.app). It provides a visual chat interface for multi-project Claude Code sessions, interactive tool approvals, file attachments, task tracking, and more — all without leaving your desktop.
 
+<p align="center">
+  <img src="screenshot.png" width="800" alt="ClaudeBox Screenshot">
+</p>
+
 ## Features
+
+### Core
 
 - **Multi-session management** — Open multiple project folders simultaneously, each with its own Claude Code session. A green indicator shows which sessions are actively running.
 - **Streaming chat UI** — Real-time message streaming with Markdown rendering, syntax-highlighted code blocks, and GitHub Flavored Markdown support.
-- **Interactive tool approvals** — Visual cards for tool calls (Read, Write, Edit, Bash, etc.) with approve/deny controls. `AskUserQuestion` and `ExitPlanMode` render as interactive forms.
-- **File attachments** — Attach code files and images to messages. Text files are embedded inline; images are passed to Claude's Read tool.
-- **Task board** — Displays Claude's `TaskCreate` / `TaskUpdate` progress in a visual task board above the input area.
-- **Project file browser** — Built-in file tree and file viewer panel for browsing your project without switching windows.
+- **Session resume** — Conversations are automatically resumed across app restarts using Claude's session ID, preserving full context without re-sending history.
+- **Persistent storage** — All session data is stored in `~/.claudebox/data/`, surviving app updates and WebView resets (auto-migrated from localStorage on first run).
+
+### Interactive Tools
+
+- **Tool approval cards** — Visual cards for every tool call (Read, Write, Edit, Bash, Glob, Grep, WebFetch, WebSearch, NotebookEdit, Agent, Skill, etc.) with approve/deny controls.
+- **AskUserQuestion** — Renders as an interactive form with selectable options and a custom text input.
+- **Plan mode (ExitPlanMode)** — Displays the full plan file content from `.claude/plans/` for review before approving or rejecting execution.
+- **Agent sub-run containers** — Nested agent tool calls are grouped into collapsible containers showing progress, running tool label, and breakdown summary.
+- **Extended thinking** — Claude's thinking/reasoning blocks are displayed in collapsible sections with visual indicators.
+
+### Attachments & Images
+
+- **File attachments** — Attach code files and images via the toolbar. Text files are embedded inline; images are passed to Claude's Read tool.
+- **Clipboard image paste** — Paste images directly from the system clipboard (Ctrl/Cmd+V). Images are saved to `~/.claudebox/tmp/` and attached automatically. Temp files older than 24 hours are cleaned up on startup.
+
+### Git Integration
+
+- **Branch display** — Current Git branch is shown in the input toolbar.
+- **Branch switching** — List and switch between local branches directly from the UI without leaving the app.
+
+### Network & Proxy
+
+- **System proxy auto-detection** — Automatically detects system proxy settings on macOS (`scutil --proxy`) and Windows (registry). Distinguishes between HTTP and SOCKS5 proxies.
+- **Dynamic proxy polling** — Polls for proxy changes every 30 seconds, supporting dynamic proxy toggling (e.g., Clash, V2Ray).
+- **Custom API endpoint** — Configure a custom Base URL for API proxies or compatible endpoints.
+
+### Configuration
+
 - **Model & mode selection** — Switch models and permission modes (Default / Auto / Plan) per session from the input toolbar.
+- **Model validation** — Validates model availability via API before adding to the model list.
 - **Tool allow-list** — Configure which tools Claude can use per session (Read, Write, Edit, Glob, Grep, Bash, etc.).
 - **Dark & Light themes** — Toggle between dark and light themes from the sidebar.
-- **i18n** — English and Chinese (simplified) interfaces.
-- **Auto-updates** — Built-in update checker via GitHub Releases with signature verification.
+- **i18n** — English and Chinese (Simplified) interfaces with 100+ translation keys.
+
+### Project Tools
+
+- **File browser** — Built-in file tree and file viewer with syntax highlighting, line numbers, and copy-to-clipboard.
+- **Task board** — Displays Claude's `TodoWrite` task progress in a visual board above the input area, with completion tracking and in-progress indicators.
+- **Open in terminal** — Quick action to open the project folder in the system terminal.
+- **Debug panel** — Toggle with `Cmd+Shift+D`. Shows color-coded logs (info, warn, error, stdin, stdout, stderr, process) from both the Rust backend and frontend. Filterable and auto-scrolling.
+
+### Updates & Platform
+
+- **Auto-updates** — Built-in update checker with Cloudflare Workers proxy and GitHub Releases fallback. Supports background download with progress tracking and signature verification.
 - **Cross-platform** — macOS (Apple Silicon + Intel) and Windows builds.
 
 ## Installation
@@ -106,7 +148,9 @@ The output will be in `src-tauri/target/release/bundle/`.
 ClaudeBox/
 ├── src/                          # React frontend
 │   ├── components/
-│   │   ├── chat/                 # ChatPanel, MessageBubble, InputArea, ToolCallCard, CodeBlock, FileTree, FileViewer, TaskBoard
+│   │   ├── chat/                 # ChatPanel, MessageBubble, InputArea,
+│   │   │                         # ToolCallCard, CodeBlock, FileTree,
+│   │   │                         # FileViewer, TaskBoard
 │   │   ├── sidebar/              # Sidebar, SessionList, NewSessionDialog
 │   │   ├── settings/             # SettingsDialog
 │   │   └── debug/                # DebugPanel (Cmd+Shift+D)
@@ -115,15 +159,17 @@ ClaudeBox/
 │   │   ├── settingsStore.ts      # Settings, theme, locale
 │   │   └── taskStore.ts          # Task tracking
 │   ├── lib/
-│   │   ├── claude-ipc.ts         # Tauri IPC wrappers
+│   │   ├── claude-ipc.ts         # Tauri IPC wrappers (25+ commands)
 │   │   ├── stream-parser.ts      # Stream event type definitions
+│   │   ├── storage.ts            # Persistent file-based storage
 │   │   ├── i18n.ts               # Internationalization (en/zh)
-│   │   ├── updater.ts            # Auto-update logic
+│   │   ├── updater.ts            # Auto-update with failover endpoints
 │   │   └── utils.ts              # Utility functions
-│   └── index.css                 # Tailwind + theme variables
+│   └── index.css                 # Tailwind CSS v4 + theme variables
 ├── src-tauri/                    # Rust backend
 │   └── src/
-│       ├── claude.rs             # Process management, IPC commands
+│       ├── claude.rs             # Process management, IPC commands,
+│       │                         # proxy detection, git operations
 │       ├── lib.rs                # Tauri app setup
 │       └── main.rs               # Entry point
 ├── sidecar/
@@ -153,6 +199,8 @@ ClaudeBox/
 │  │  - Pipe stdin/stdout (NDJSON protocol)             │    │
 │  │  - Emit stream events to frontend                  │    │
 │  │  - Shell env resolution (PATH, API keys)           │    │
+│  │  - System proxy detection & injection              │    │
+│  │  - Git branch operations                           │    │
 │  └──────────┬─────────────────────────────────────────┘    │
 ├─────────────┼──────────────────────────────────────────────┤
 │             ▼     Node.js Sidecar (bridge.mjs)             │
@@ -162,6 +210,7 @@ ClaudeBox/
 │  │  - Streams events on stdout                        │    │
 │  │  - canUseTool: AskUserQuestion / ExitPlanMode      │    │
 │  │  - File attachment processing                      │    │
+│  │  - Session resume support                          │    │
 │  └────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -195,7 +244,7 @@ Open **Settings** from the sidebar gear icon:
 |---------|-------------|
 | **API Key** | Your Anthropic API key (required) |
 | **Base URL** | Custom API base URL (optional, for proxies) |
-| **Models** | List of available model IDs to choose from |
+| **Models** | Available model IDs (validated before adding) |
 | **Claude CLI Path** | Custom path to `claude` binary (auto-detected by default) |
 | **Theme** | Dark / Light |
 | **Language** | English / Chinese |
@@ -205,12 +254,15 @@ Per-session settings are available in the input toolbar:
 - **Permission Mode** — Default (manual approval) / Auto / Plan
 - **Allowed Tools** — Toggle individual tools on/off
 
+Data is stored in `~/.claudebox/data/` and persists across app updates.
+
 ## Keyboard Shortcuts
 
 | Shortcut | Action |
 |----------|--------|
 | `Enter` | Send message |
 | `Shift+Enter` | New line in input |
+| `Cmd/Ctrl+V` | Paste image from clipboard |
 | `Cmd+Shift+D` | Toggle debug panel |
 
 ## FAQ
@@ -219,13 +271,19 @@ Per-session settings are available in the input toolbar:
 A: Yes. ClaudeBox uses the [Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) which requires Claude Code (`@anthropic-ai/claude-code`) to be installed and accessible in your PATH.
 
 **Q: Where are sessions stored?**
-A: Sessions and messages are persisted in the browser's `localStorage` via Tauri's WebView. They survive app restarts but are cleared if you reset the app data.
+A: Sessions and messages are persisted in `~/.claudebox/data/`. This is independent of the WebView storage and survives app updates.
 
 **Q: Can I use a custom API endpoint?**
 A: Yes. Set the **Base URL** in Settings to point to your proxy or compatible API endpoint.
 
+**Q: Does ClaudeBox support system proxies?**
+A: Yes. ClaudeBox automatically detects system proxy settings (HTTP/SOCKS5) and injects them into the sidecar environment. Proxy changes are polled every 30 seconds, so toggling your proxy tool (Clash, V2Ray, etc.) is picked up automatically.
+
 **Q: macOS says the app is damaged / can't be opened?**
 A: Run `xattr -cr /Applications/ClaudeBox.app` in Terminal to remove the quarantine flag.
+
+**Q: Can I resume a previous conversation?**
+A: Yes. ClaudeBox automatically stores the Claude session ID. When you send a new message in an existing session, the conversation resumes with full context.
 
 ## Contributing
 

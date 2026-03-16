@@ -46,6 +46,7 @@ const en: TranslationDict = {
   "chat.clearSession": "New session",
   "chat.clearSessionConfirm": "Clear session memory? The next message will start a fresh conversation without previous context.",
   "chat.sessionCleared": "Session memory cleared. Next message will start fresh.",
+  "chat.stoppedByUser": "Generation stopped by user",
 
   // Permission modes
   "mode.default": "Default",
@@ -88,7 +89,10 @@ const en: TranslationDict = {
   "viewer.lines": "lines",
   "viewer.copyContent": "Copy content",
   "viewer.close": "Close",
+  "viewer.closeAll": "Close all tabs",
   "viewer.loading": "Loading...",
+  "viewer.source": "Source",
+  "viewer.preview": "Preview",
 
   // DebugPanel
   "debug.title": "Debug Console",
@@ -144,6 +148,7 @@ const en: TranslationDict = {
 
   // Terminal
   "input.openTerminal": "Open in Terminal",
+  "input.terminal": "Terminal",
 };
 
 const zh: TranslationDict = {
@@ -190,6 +195,7 @@ const zh: TranslationDict = {
   "chat.clearSession": "新会话",
   "chat.clearSessionConfirm": "清除会话记忆？下次发送消息将开启全新对话，不保留之前的上下文。",
   "chat.sessionCleared": "会话记忆已清除，下次发送消息将开启全新对话。",
+  "chat.stoppedByUser": "用户已停止生成",
 
   // Permission modes
   "mode.default": "默认",
@@ -232,7 +238,10 @@ const zh: TranslationDict = {
   "viewer.lines": "行",
   "viewer.copyContent": "复制内容",
   "viewer.close": "关闭",
+  "viewer.closeAll": "关闭所有标签",
   "viewer.loading": "加载中...",
+  "viewer.source": "源码",
+  "viewer.preview": "预览",
 
   // DebugPanel
   "debug.title": "调试控制台",
@@ -288,6 +297,7 @@ const zh: TranslationDict = {
 
   // Terminal
   "input.openTerminal": "在终端中打开",
+  "input.terminal": "终端",
 };
 
 const dictionaries: Record<string, TranslationDict> = { en, zh };
