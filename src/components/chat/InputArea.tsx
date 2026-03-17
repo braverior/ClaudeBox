@@ -637,7 +637,7 @@ export default function InputArea({
 
             {/* Inline toolbar */}
             {onModelChange && onPermissionModeChange && (
-              <div className="flex items-center gap-1 min-w-0 flex-wrap">
+              <div className="flex items-center gap-0.5 min-w-0 flex-wrap">
                 {/* New session button */}
                 {onClearSession && (
                   <>
@@ -650,7 +650,7 @@ export default function InputArea({
                       <Eraser size={12} className="flex-shrink-0" />
                       <span>{t("chat.clearSession")}</span>
                     </button>
-                    <span className="text-border/40 mx-0.5 flex-shrink-0">|</span>
+                    <span className="text-border/40 flex-shrink-0">|</span>
                   </>
                 )}
                 {models.length > 0 ? (
@@ -672,7 +672,7 @@ export default function InputArea({
                                placeholder:text-text-muted/50 transition-colors"
                   />
                 )}
-                <span className="text-border/40 mx-0.5 flex-shrink-0">|</span>
+                <span className="text-border/40 flex-shrink-0">|</span>
                 <DropdownSelect
                   value={permissionMode}
                   options={[
@@ -686,7 +686,7 @@ export default function InputArea({
                 />
                 {onAllowedToolsChange && (
                   <>
-                    <span className="text-border/40 mx-0.5 flex-shrink-0">|</span>
+                    <span className="text-border/40 flex-shrink-0">|</span>
                     <ToolsSelector
                       selected={allowedTools}
                       onChange={onAllowedToolsChange}
@@ -696,7 +696,7 @@ export default function InputArea({
                 )}
                 {gitBranch && projectPath && onBranchChange && (
                   <>
-                    <span className="text-border/40 mx-0.5 flex-shrink-0">|</span>
+                    <span className="text-border/40 flex-shrink-0">|</span>
                     <BranchDropdown
                       branch={gitBranch}
                       projectPath={projectPath}
@@ -706,7 +706,7 @@ export default function InputArea({
                 )}
                 {onOpenTerminal && (
                   <>
-                    <span className="text-border/40 mx-0.5 flex-shrink-0">|</span>
+                    <span className="text-border/40 flex-shrink-0">|</span>
                     <button
                       onClick={onOpenTerminal}
                       className="flex items-center gap-1 px-2 py-1 rounded-md text-xs
