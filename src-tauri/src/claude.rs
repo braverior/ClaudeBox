@@ -42,17 +42,23 @@ fn detect_system_proxy() -> (String, String) {
 
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let mut http_proxy = String::new();
         if let Ok(output) = Command::new("reg")
             .args(["query", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings", "/v", "ProxyEnable"])
-            .stdout(Stdio::piped()).stderr(Stdio::null()).output()
+            .stdout(Stdio::piped()).stderr(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
         {
             let text = String::from_utf8_lossy(&output.stdout);
             let enabled = text.lines().any(|l| l.contains("ProxyEnable") && l.trim().ends_with("0x1"));
             if enabled {
                 if let Ok(output2) = Command::new("reg")
                     .args(["query", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings", "/v", "ProxyServer"])
-                    .stdout(Stdio::piped()).stderr(Stdio::null()).output()
+                    .stdout(Stdio::piped()).stderr(Stdio::null())
+                    .creation_flags(CREATE_NO_WINDOW)
+                    .output()
                 {
                     let text2 = String::from_utf8_lossy(&output2.stdout);
                     for line in text2.lines() {
@@ -134,8 +140,15 @@ pub struct ProxyStatus {
 }
 
 #[tauri::command]
-pub fn apply_system_proxy() -> Result<ProxyStatus, String> {
-    let (http, socks) = detect_system_proxy();
+pub async fn apply_system_proxy() -> Result<ProxyStatus, String> {
+    // Run blocking subprocess calls (reg query on Windows, scutil on macOS) on
+    // a background thread so the async Tauri command handler is not stalled.
+    let (tx, rx) = std::sync::mpsc::channel::<(String, String)>();
+    std::thread::spawn(move || {
+        let _ = tx.send(detect_system_proxy());
+    });
+    let (http, socks) = rx.recv_timeout(std::time::Duration::from_secs(5))
+        .unwrap_or_default();
 
     // Check if changed compared to cached values
     let changed = {
