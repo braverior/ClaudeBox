@@ -10,6 +10,12 @@ import { User, Loader2, Brain, ChevronDown, ChevronRight, Info, FileCode2, FileT
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import type { ComponentPropsWithoutRef } from "react";
 
+// remark-gfm uses lookbehind regex + Unicode property escapes which are unsupported
+// on macOS 12 and earlier (WebKit < 16.4). Detect support once and fall back gracefully.
+let supportsLookbehind = false;
+try { new RegExp("(?<=a)b"); supportsLookbehind = true; } catch { /* old WebKit */ }
+const remarkPlugins = supportsLookbehind ? [remarkGfm] : [];
+
 // ── File category styling (shared with InputArea) ──────────────────
 
 type FileCategory = "code" | "config" | "doc" | "web" | "shell" | "image" | "other";
@@ -59,7 +65,7 @@ const TextBlock = memo(function TextBlock({ text }: { text: string }) {
   return (
     <div className="markdown-body">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={remarkPlugins}
         components={{
           code(props: ComponentPropsWithoutRef<"code">) {
             const { className, children, ...rest } = props;

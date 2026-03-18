@@ -563,6 +563,23 @@ pub async fn check_claude_installed(claude_path: Option<String>) -> Result<Strin
     }
 }
 
+/// Check Node.js version. Returns the version string (e.g. "v22.3.0") on success.
+#[tauri::command]
+pub async fn check_node_version() -> Result<String, String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(command_with_path("node").arg("--version").output());
+    });
+    match rx.recv_timeout(std::time::Duration::from_secs(5)) {
+        Ok(Ok(output)) if output.status.success() => {
+            Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        }
+        Ok(Ok(output)) => Err(String::from_utf8_lossy(&output.stderr).trim().to_string()),
+        Ok(Err(e)) => Err(format!("node not found: {}", e)),
+        Err(_) => Err("node version check timed out".to_string()),
+    }
+}
+
 /// Check whether a model ID is available by making a minimal API call.
 /// Uses curl to POST to the Anthropic Messages API with max_tokens=1.
 /// Returns Ok(()) if model is valid, Err(reason) otherwise.

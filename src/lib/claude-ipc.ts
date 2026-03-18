@@ -80,6 +80,11 @@ export async function checkClaudeInstalled(
   return invoke("check_claude_installed", { claudePath: claudePath ?? null });
 }
 
+/** Check Node.js version. Returns version string like "v22.3.0" */
+export async function checkNodeVersion(): Promise<string> {
+  return invoke("check_node_version");
+}
+
 /** Check if a model is available by making a minimal API call */
 export async function checkModelAvailable(
   model: string,

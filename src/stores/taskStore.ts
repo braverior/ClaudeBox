@@ -15,6 +15,8 @@ interface TaskState {
   updateTask: (id: string, updates: Partial<Task>) => void;
   removeTask: (id: string) => void;
   clearTasks: (sessionId: string) => void;
+  /** Mark all non-completed tasks for a session as completed (called on stream end) */
+  markAllCompleted: (sessionId: string) => void;
   /** Parse a tool_use block to extract task operations */
   handleToolUse: (sessionId: string, name: string, input: Record<string, unknown>, result?: string) => void;
 }
@@ -40,6 +42,16 @@ export const useTaskStore = create<TaskState>((set, get) => ({
 
   clearTasks: (sessionId) => {
     set({ tasks: get().tasks.filter((t) => t.sessionId !== sessionId) });
+  },
+
+  markAllCompleted: (sessionId) => {
+    set({
+      tasks: get().tasks.map((t) =>
+        t.sessionId === sessionId && t.status !== "completed"
+          ? { ...t, status: "completed" }
+          : t
+      ),
+    });
   },
 
   handleToolUse: (sessionId, name, input, result) => {

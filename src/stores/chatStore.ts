@@ -9,6 +9,14 @@ import { useTaskStore } from "./taskStore";
 import { v4Style } from "../lib/utils";
 import { storageRead, storageWrite, storageRemove } from "../lib/storage";
 
+/** Wraps a promise with a timeout — rejects after `ms` milliseconds */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error("timeout")), ms)),
+  ]);
+}
+
 export interface Session {
   id: string;
   projectPath: string;
@@ -73,7 +81,7 @@ const LS_MESSAGES_KEY_PREFIX = "claudebox-msgs-";
 
 async function loadSessionsFromFile(): Promise<Session[]> {
   try {
-    const data = await storageRead(SESSIONS_KEY);
+    const data = await withTimeout(storageRead(SESSIONS_KEY), 5000);
     if (data) {
       const sessions: Session[] = JSON.parse(data);
       return sessions.map((s) => ({
@@ -91,7 +99,7 @@ function saveSessions(sessions: Session[]) {
 
 async function loadMessagesFromFile(sessionId: string): Promise<ChatMessage[]> {
   try {
-    const data = await storageRead(MESSAGES_KEY_PREFIX + sessionId);
+    const data = await withTimeout(storageRead(MESSAGES_KEY_PREFIX + sessionId), 5000);
     if (data) return JSON.parse(data);
   } catch { /* ignore */ }
   return [];

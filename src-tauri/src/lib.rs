@@ -31,6 +31,7 @@ pub fn run() {
             claude::apply_system_proxy,
             claude::probe_url,
             claude::check_claude_installed,
+            claude::check_node_version,
             claude::check_model_available,
             claude::get_git_branch,
             claude::list_git_branches,

@@ -8,6 +8,11 @@ import CodeBlock from "./CodeBlock";
 import hljs from "highlight.js";
 import type { ComponentPropsWithoutRef } from "react";
 
+// Same lookbehind guard as MessageBubble
+let supportsLookbehind = false;
+try { new RegExp("(?<=a)b"); supportsLookbehind = true; } catch { /* old WebKit */ }
+const remarkPlugins = supportsLookbehind ? [remarkGfm] : [];
+
 // ── Types ────────────────────────────────────────────────────────────
 
 export interface FileViewerProps {
@@ -242,7 +247,7 @@ const TabContent = memo(function TabContent({ filePath, isActive }: TabContentPr
           <div className="flex-1 overflow-auto bg-code-bg p-4">
             <div className="markdown-body max-w-none prose-invert">
               <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
+                remarkPlugins={remarkPlugins}
                 components={{
                   code(props: ComponentPropsWithoutRef<"code">) {
                     const { className, children, ...rest } = props;

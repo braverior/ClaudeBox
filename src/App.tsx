@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, Component, type ReactNode } from "react";
 import Sidebar from "./components/sidebar/Sidebar";
 import ChatPanel from "./components/chat/ChatPanel";
 import SettingsDialog from "./components/settings/SettingsDialog";
@@ -14,6 +14,41 @@ import { useSettingsStore } from "./stores/settingsStore";
 import { useChatStore } from "./stores/chatStore";
 import { Loader2 } from "lucide-react";
 
+// ── Error Boundary ────────────────────────────────────────────────────
+// Catches any render-time exception and shows a recovery screen
+// instead of a blank white page.
+interface ErrorBoundaryState { error: Error | null }
+class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryState> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="flex h-screen bg-bg-primary items-center justify-center p-8">
+          <div className="max-w-lg text-center">
+            <p className="text-error font-semibold mb-2">Something went wrong</p>
+            <pre className="text-xs text-text-muted bg-bg-secondary rounded p-3 text-left overflow-auto max-h-48">
+              {this.state.error.message}
+            </pre>
+            <button
+              className="mt-4 px-4 py-1.5 text-sm rounded-lg bg-accent text-white"
+              onClick={() => window.location.reload()}
+            >
+              Reload
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [debugOpen, setDebugOpen] = useState(false);
@@ -22,10 +57,17 @@ export default function App() {
   const [updateDismissed, setUpdateDismissed] = useState(false);
   const { settings, loaded: settingsLoaded, init: initSettings } = useSettingsStore();
   const { loaded: chatLoaded, init: initChat } = useChatStore();
+  // Fallback: force-show the app after 8s even if stores never finish loading
+  // (guards against Tauri IPC hang on slow machines)
+  const [forceReady, setForceReady] = useState(false);
 
   // Initialize stores from file storage on mount
   useEffect(() => {
-    Promise.all([initSettings(), initChat()]).catch(console.error);
+    const timer = setTimeout(() => setForceReady(true), 8000);
+    Promise.all([initSettings(), initChat()])
+      .catch(console.error)
+      .finally(() => clearTimeout(timer));
+    return () => clearTimeout(timer);
   }, []);
 
   // Apply theme class to root element
@@ -95,8 +137,8 @@ export default function App() {
     return () => clearInterval(id);
   }, [settingsLoaded, chatLoaded, refreshProxy]);
 
-  // Show loading screen until stores are ready
-  if (!settingsLoaded || !chatLoaded) {
+  // Show loading screen until stores are ready (or timeout fires)
+  if (!forceReady && (!settingsLoaded || !chatLoaded)) {
     return (
       <div className="flex h-screen bg-bg-primary items-center justify-center">
         <Loader2 size={32} className="animate-spin text-accent" />
@@ -105,6 +147,7 @@ export default function App() {
   }
 
   return (
+    <ErrorBoundary>
     <div className="flex h-screen bg-bg-primary">
       <Sidebar
         onOpenSettings={() => setSettingsOpen(true)}
@@ -137,5 +180,6 @@ export default function App() {
           />
         )}
     </div>
+    </ErrorBoundary>
   );
 }

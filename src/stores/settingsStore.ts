@@ -35,14 +35,22 @@ const defaultSettings: Settings = {
   baseUrl: "",
 };
 
+/** Wraps a promise with a timeout — rejects after `ms` milliseconds */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error("timeout")), ms)),
+  ]);
+}
+
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   settings: defaultSettings,
   loaded: false,
 
   init: async () => {
-    // 1. Try loading from file storage
+    // 1. Try loading from file storage (5s timeout guards against IPC hang)
     try {
-      const data = await storageRead(STORAGE_KEY);
+      const data = await withTimeout(storageRead(STORAGE_KEY), 5000);
       if (data) {
         set({ settings: { ...defaultSettings, ...JSON.parse(data) }, loaded: true });
         return;

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useCallback, useState, useMemo, memo } from "react";
 import { useChatStore } from "../../stores/chatStore";
 import { useSettingsStore } from "../../stores/settingsStore";
+import { useTaskStore } from "../../stores/taskStore";
 import { sendMessage, stopSession, onStream, getGitBranch, listGitBranches, checkoutGitBranch, sendResponse, clearSessionResume, openInTerminal, gitDiffFiles } from "../../lib/claude-ipc";
 import { getCurrentWindow, PhysicalSize } from "@tauri-apps/api/window";
 import { useT } from "../../lib/i18n";
@@ -370,6 +371,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
   } = useChatStore();
 
   const { settings } = useSettingsStore();
+  const { markAllCompleted } = useTaskStore();
   const t = useT();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const currentSession = sessions.find((s) => s.id === currentSessionId);
@@ -380,6 +382,8 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
   const [activeFileIndex, setActiveFileIndex] = useState(0);
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
   const [changedFiles, setChangedFiles] = useState<Set<string>>(new Set());
+  const [fileTreeRefreshKey, setFileTreeRefreshKey] = useState(0);
+  const toolNameMapRef = useRef<Map<string, string>>(new Map());
 
   const FILE_PANEL_WIDTH = 256; // w-64
 
@@ -428,14 +432,32 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
     const unlisten = onStream((payload) => {
       if (payload.done) {
         handleStreamDone(payload.session_id, payload.error ?? undefined);
+        markAllCompleted(payload.session_id);
+        setFileTreeRefreshKey((k) => k + 1);
       } else if (payload.data) {
         handleStreamData(payload.session_id, payload.data, payload.stream);
+        // Track tool_use ids → names, refresh tree on file-modifying tool results
+        try {
+          const msg = JSON.parse(payload.data) as { type: string; message?: { content?: Array<{ type: string; id?: string; name?: string; tool_use_id?: string }> } };
+          if (msg.type === "assistant" && msg.message?.content) {
+            for (const block of msg.message.content) {
+              if (block.type === "tool_use" && block.id && block.name) {
+                toolNameMapRef.current.set(block.id, block.name);
+              }
+            }
+          } else if (msg.type === "user" && msg.message?.content) {
+            const FILE_TOOLS = new Set(["Edit", "Write", "NotebookEdit", "Bash"]);
+            const hasFileOp = msg.message.content.some(
+              (block) => block.type === "tool_result" && block.tool_use_id &&
+                FILE_TOOLS.has(toolNameMapRef.current.get(block.tool_use_id) ?? "")
+            );
+            if (hasFileOp) setFileTreeRefreshKey((k) => k + 1);
+          }
+        } catch { /* ignore parse errors */ }
       }
     });
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, [handleStreamData, handleStreamDone]);
+    return () => { unlisten.then((fn) => fn()); };
+  }, [handleStreamData, handleStreamDone, markAllCompleted]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -787,7 +809,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
         {/* File panel — tree only, viewer is shown in the chat area */}
         {showFilePanel && currentSession?.projectPath && (
           <div className="w-64 border-l border-border bg-bg-secondary flex-shrink-0">
-            <FileTree rootPath={currentSession.projectPath} changedFiles={changedFiles} onFileSelect={(path) => {
+            <FileTree rootPath={currentSession.projectPath} changedFiles={changedFiles} refreshKey={fileTreeRefreshKey} onFileSelect={(path) => {
               const existing = openFiles.indexOf(path);
               if (existing >= 0) {
                 setActiveFileIndex(existing);

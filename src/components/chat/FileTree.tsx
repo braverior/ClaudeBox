@@ -361,9 +361,10 @@ interface FileTreeProps {
   rootPath: string;
   changedFiles?: Set<string>;
   onFileSelect?: (path: string) => void;
+  refreshKey?: number;
 }
 
-export default function FileTree({ rootPath, changedFiles = new Set(), onFileSelect }: FileTreeProps) {
+export default function FileTree({ rootPath, changedFiles = new Set(), onFileSelect, refreshKey }: FileTreeProps) {
   const [entries, setEntries] = useState<DirEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -377,7 +378,7 @@ export default function FileTree({ rootPath, changedFiles = new Set(), onFileSel
     setLoading(false);
   }, [rootPath]);
 
-  useEffect(() => { loadRoot(); }, [loadRoot]);
+  useEffect(() => { loadRoot(); }, [loadRoot, refreshKey]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent, entry: DirEntry) => {
     e.preventDefault();

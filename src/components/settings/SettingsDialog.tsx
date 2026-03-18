@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { X, CheckCircle, XCircle, Loader2, ScrollText, Plus, Trash2, Copy, Check } from "lucide-react";
 import { useSettingsStore } from "../../stores/settingsStore";
-import { checkClaudeInstalled, checkModelAvailable } from "../../lib/claude-ipc";
+import { checkClaudeInstalled, checkModelAvailable, checkNodeVersion } from "../../lib/claude-ipc";
 import { useT } from "../../lib/i18n";
 
 function getInstallInstructions(): { platform: string; command: string; note: string } {
@@ -16,13 +16,13 @@ function getInstallInstructions(): { platform: string; command: string; note: st
     return {
       platform: "Windows",
       command: "npm install -g @anthropic-ai/claude-code",
-      note: "Requires Node.js 18+.",
+      note: "Requires Node.js 22+.",
     };
   } else {
     return {
       platform: "Linux",
       command: "npm install -g @anthropic-ai/claude-code",
-      note: "Requires Node.js 18+. Or use: curl -fsSL https://cli.anthropic.com/install.sh | sh",
+      note: "Requires Node.js 22+. Or use: curl -fsSL https://cli.anthropic.com/install.sh | sh",
     };
   }
 }
@@ -74,6 +74,7 @@ export default function SettingsDialog({
   const [claudeVersion, setClaudeVersion] = useState<string | null>(null);
   const [claudeError, setClaudeError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
+  const [nodeWarning, setNodeWarning] = useState<string | null>(null);
   const [modelInput, setModelInput] = useState("");
   const [modelChecking, setModelChecking] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
@@ -113,6 +114,14 @@ export default function SettingsDialog({
   const checkClaude = async () => {
     setChecking(true);
     setClaudeError(null);
+    setNodeWarning(null);
+    // Check Node.js version in parallel
+    checkNodeVersion().then((ver) => {
+      const major = parseInt(ver.replace(/^v/, "").split(".")[0], 10);
+      if (!isNaN(major) && major < 22) {
+        setNodeWarning(ver);
+      }
+    }).catch(() => {});
     try {
       const version = await checkClaudeInstalled(
         settings.claudePath || undefined
@@ -189,6 +198,25 @@ export default function SettingsDialog({
             </div>
             {/* Install instructions when not found */}
             {!checking && !claudeVersion && <InstallInstructions />}
+            {/* Node.js version warning */}
+            {!checking && nodeWarning && (
+              <div className="mt-2 rounded-lg bg-warning/10 border border-warning/30 px-3 py-2 flex items-start gap-2">
+                <span className="text-warning text-xs mt-0.5">⚠</span>
+                <div className="text-xs text-warning/90">
+                  Node.js {nodeWarning} is too old. Claude Code requires Node.js ≥ 22.
+                  {" "}
+                  <a
+                    href="https://nodejs.org"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline hover:text-warning"
+                    onClick={(e) => { e.preventDefault(); import("../../lib/claude-ipc").then(m => m.openInBrowser("https://nodejs.org")); }}
+                  >
+                    nodejs.org
+                  </a>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Claude CLI Path */}
