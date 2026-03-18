@@ -82,8 +82,23 @@ const en: TranslationDict = {
   "settings.baseUrl": "API Base URL",
   "settings.baseUrlHint": "Optional. Override the Anthropic API endpoint (for proxies).",
   "settings.viewLogs": "View Logs",
+  "settings.tokenStats": "Token Usage",
   "settings.done": "Done",
   "settings.copyCommand": "Copy command",
+
+  // Token Stats
+  "tokenStats.title": "Token Usage",
+  "tokenStats.allProjects": "All Projects",
+  "tokenStats.input": "Input",
+  "tokenStats.cacheWrite": "Cache Write",
+  "tokenStats.cacheRead": "Cache Read",
+  "tokenStats.output": "Output",
+  "tokenStats.turns": "turns",
+  "tokenStats.empty": "No token usage recorded yet.",
+  "tokenStats.resetProject": "Reset this project",
+  "tokenStats.confirmReset": "Click again to confirm reset",
+  "tokenStats.resetAll": "Reset All",
+  "tokenStats.confirmResetAll": "Click again to confirm",
 
   // FileTree
   "files.title": "Files",
@@ -243,8 +258,23 @@ const zh: TranslationDict = {
   "settings.baseUrl": "API 基础地址",
   "settings.baseUrlHint": "可选。用于代理时覆盖 Anthropic API 端点。",
   "settings.viewLogs": "查看日志",
+  "settings.tokenStats": "Token 统计",
   "settings.done": "完成",
   "settings.copyCommand": "复制命令",
+
+  // Token Stats
+  "tokenStats.title": "Token 使用统计",
+  "tokenStats.allProjects": "所有项目合计",
+  "tokenStats.input": "输入",
+  "tokenStats.cacheWrite": "缓存写入",
+  "tokenStats.cacheRead": "缓存读取",
+  "tokenStats.output": "输出",
+  "tokenStats.turns": "轮",
+  "tokenStats.empty": "暂无 Token 使用记录。",
+  "tokenStats.resetProject": "重置此项目",
+  "tokenStats.confirmReset": "再次点击确认重置",
+  "tokenStats.resetAll": "清空全部",
+  "tokenStats.confirmResetAll": "再次点击确认",
 
   // FileTree
   "files.title": "文件",

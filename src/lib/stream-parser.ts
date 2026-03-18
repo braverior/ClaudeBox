@@ -95,6 +95,10 @@ export interface ChatMessage {
     tokens: number;
     durationMs: number;
     costUsd?: number;
+    inputTokens?: number;
+    cacheCreationTokens?: number;
+    cacheReadTokens?: number;
+    outputTokens?: number;
   };
 }
 

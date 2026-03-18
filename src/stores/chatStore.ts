@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { useTokenUsageStore } from "./tokenUsageStore";
 import type {
   ChatMessage,
   ContentBlock,
@@ -516,15 +517,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const startTime = get().streamStartTimes[sessionId];
         let turnTokens = 0;
         let lastAssistantIdx = -1;
+        let inputTokens = 0, cacheCreationTokens = 0, cacheReadTokens = 0, outputTokens = 0;
         for (let i = msgs.length - 1; i >= 0; i--) {
           if (msgs[i].role === "user") break;
           if (msgs[i].role === "assistant") {
             if (lastAssistantIdx === -1) lastAssistantIdx = i;
             if (msgs[i].usage) {
-              turnTokens += (msgs[i].usage!.input_tokens || 0)
-                + (msgs[i].usage!.output_tokens || 0)
-                + (msgs[i].usage!.cache_creation_input_tokens || 0)
-                + (msgs[i].usage!.cache_read_input_tokens || 0);
+              const u = msgs[i].usage!;
+              inputTokens += u.input_tokens || 0;
+              outputTokens += u.output_tokens || 0;
+              cacheCreationTokens += u.cache_creation_input_tokens || 0;
+              cacheReadTokens += u.cache_read_input_tokens || 0;
+              turnTokens += (u.input_tokens || 0) + (u.output_tokens || 0)
+                + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);
             }
           }
         }
@@ -538,8 +543,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
               tokens: turnTokens,
               durationMs,
               costUsd: event.total_cost_usd,
+              inputTokens,
+              cacheCreationTokens,
+              cacheReadTokens,
+              outputTokens,
             },
           };
+        }
+        // 记录到 token 使用统计
+        if (event.total_cost_usd != null || turnTokens > 0) {
+          const session = get().sessions.find((s) => s.id === sessionId);
+          if (session) {
+            useTokenUsageStore.getState().addUsage({
+              projectPath: session.projectPath,
+              projectName: session.projectName,
+              inputTokens,
+              cacheCreationTokens,
+              cacheReadTokens,
+              outputTokens,
+              costUsd: event.total_cost_usd ?? 0,
+            });
+          }
         }
         for (let i = 0; i < msgs.length; i++) {
           if (msgs[i].isStreaming) {

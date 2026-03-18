@@ -10,6 +10,7 @@ import {
   Info,
   RefreshCw,
   Github,
+  BarChart2,
 } from "lucide-react";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -23,6 +24,7 @@ import type { UpdateStatus } from "../../lib/updater";
 
 interface SidebarProps {
   onOpenSettings: () => void;
+  onOpenTokenStats: () => void;
   updateStatus: UpdateStatus | null;
   onRestart: () => void;
   onCheckUpdate: () => Promise<void>;
@@ -30,6 +32,7 @@ interface SidebarProps {
 
 export default function Sidebar({
   onOpenSettings,
+  onOpenTokenStats,
   updateStatus,
   onRestart,
   onCheckUpdate,
@@ -270,6 +273,13 @@ export default function Sidebar({
             {settings.theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
           </button>
           <button
+            onClick={onOpenTokenStats}
+            className="p-2 rounded-lg text-text-secondary hover:bg-bg-tertiary/50 hover:text-text-primary transition-colors"
+            title="Token 统计"
+          >
+            <BarChart2 size={16} />
+          </button>
+          <button
             onClick={onOpenSettings}
             className="p-2 rounded-lg text-text-secondary hover:bg-bg-tertiary/50 hover:text-text-primary transition-colors"
             title={t("sidebar.settings")}
@@ -362,6 +372,13 @@ export default function Sidebar({
           }
         >
           {settings.theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+        </button>
+        <button
+          onClick={onOpenTokenStats}
+          className="p-2 rounded-lg text-text-secondary hover:bg-bg-tertiary/50 hover:text-text-primary transition-colors"
+          title="Token 统计"
+        >
+          <BarChart2 size={16} />
         </button>
         <button
           onClick={onOpenSettings}

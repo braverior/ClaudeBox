@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, Component, type ReactNode } f
 import Sidebar from "./components/sidebar/Sidebar";
 import ChatPanel from "./components/chat/ChatPanel";
 import SettingsDialog from "./components/settings/SettingsDialog";
+import TokenStatsDialog from "./components/settings/TokenStatsDialog";
 import DebugPanel from "./components/debug/DebugPanel";
 import UpdateToast from "./components/UpdateToast";
 import { checkClaudeInstalled, applySystemProxy, emitDebug } from "./lib/claude-ipc";
@@ -12,7 +13,9 @@ import {
 } from "./lib/updater";
 import { useSettingsStore } from "./stores/settingsStore";
 import { useChatStore } from "./stores/chatStore";
-import { Loader2 } from "lucide-react";
+import { useTokenUsageStore } from "./stores/tokenUsageStore";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { Loader2, AlertTriangle } from "lucide-react";
 
 // ── Error Boundary ────────────────────────────────────────────────────
 // Catches any render-time exception and shows a recovery screen
@@ -51,12 +54,15 @@ class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryStat
 
 export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [tokenStatsOpen, setTokenStatsOpen] = useState(false);
   const [debugOpen, setDebugOpen] = useState(false);
   const [claudeAvailable, setClaudeAvailable] = useState(true);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [updateDismissed, setUpdateDismissed] = useState(false);
+  const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
   const { settings, loaded: settingsLoaded, init: initSettings } = useSettingsStore();
   const { loaded: chatLoaded, init: initChat } = useChatStore();
+  const { init: initTokenUsage } = useTokenUsageStore();
   // Fallback: force-show the app after 8s even if stores never finish loading
   // (guards against Tauri IPC hang on slow machines)
   const [forceReady, setForceReady] = useState(false);
@@ -64,7 +70,7 @@ export default function App() {
   // Initialize stores from file storage on mount
   useEffect(() => {
     const timer = setTimeout(() => setForceReady(true), 8000);
-    Promise.all([initSettings(), initChat()])
+    Promise.all([initSettings(), initChat(), initTokenUsage()])
       .catch(console.error)
       .finally(() => clearTimeout(timer));
     return () => clearTimeout(timer);
@@ -137,6 +143,21 @@ export default function App() {
     return () => clearInterval(id);
   }, [settingsLoaded, chatLoaded, refreshProxy]);
 
+  // ── Close-window intercept: warn if a task is still running ──
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    getCurrentWindow().onCloseRequested(async (event) => {
+      const { streamingSessions } = useChatStore.getState();
+      const hasRunning = Object.values(streamingSessions).some(Boolean);
+      if (hasRunning) {
+        event.preventDefault();
+        setCloseConfirmOpen(true);
+      }
+      // else: do nothing — window closes normally
+    }).then((fn) => { unlisten = fn; });
+    return () => unlisten?.();
+  }, []);
+
   // Show loading screen until stores are ready (or timeout fires)
   if (!forceReady && (!settingsLoaded || !chatLoaded)) {
     return (
@@ -151,6 +172,7 @@ export default function App() {
     <div className="flex h-screen bg-bg-primary">
       <Sidebar
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenTokenStats={() => setTokenStatsOpen(true)}
         updateStatus={updateStatus}
         onRestart={applyUpdateAndRelaunch}
         onCheckUpdate={() => checkAndDownloadUpdate(setUpdateStatus)}
@@ -165,7 +187,41 @@ export default function App() {
         onClose={() => setSettingsOpen(false)}
         onClaudeStatusChange={setClaudeAvailable}
         onOpenDebug={() => setDebugOpen(true)}
+        onOpenTokenStats={() => setTokenStatsOpen(true)}
       />
+
+      <TokenStatsDialog open={tokenStatsOpen} onClose={() => setTokenStatsOpen(false)} />
+
+      {/* Close confirm dialog */}
+      {closeConfirmOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60">
+          <div className="bg-bg-primary border border-border rounded-2xl w-80 shadow-2xl p-6">
+            <div className="flex items-center gap-3 mb-3">
+              <AlertTriangle size={20} className="text-warning flex-shrink-0" />
+              <h3 className="text-base font-semibold text-text-primary">任务运行中</h3>
+            </div>
+            <p className="text-sm text-text-secondary mb-5">
+              当前有 AI 任务正在执行，关闭窗口将中断运行。确定要退出吗？
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setCloseConfirmOpen(false)}
+                className="flex-1 py-2 rounded-lg border border-border text-text-secondary
+                           hover:bg-bg-secondary hover:text-text-primary transition-colors text-sm font-medium"
+              >
+                继续等待
+              </button>
+              <button
+                onClick={() => getCurrentWindow().destroy()}
+                className="flex-1 py-2 rounded-lg bg-error text-white hover:bg-error/80
+                           transition-colors text-sm font-medium"
+              >
+                强制退出
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Update toast — shows when update is downloading or ready */}
       {updateStatus?.available &&

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, CheckCircle, XCircle, Loader2, ScrollText, Plus, Trash2, Copy, Check } from "lucide-react";
+import { X, CheckCircle, XCircle, Loader2, ScrollText, Plus, Trash2, Copy, Check, BarChart2 } from "lucide-react";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { checkClaudeInstalled, checkModelAvailable, checkNodeVersion } from "../../lib/claude-ipc";
 import { useT } from "../../lib/i18n";
@@ -32,6 +32,7 @@ interface SettingsDialogProps {
   onClose: () => void;
   onClaudeStatusChange: (available: boolean) => void;
   onOpenDebug?: () => void;
+  onOpenTokenStats?: () => void;
 }
 
 function InstallInstructions() {
@@ -68,6 +69,7 @@ export default function SettingsDialog({
   onClose,
   onClaudeStatusChange,
   onOpenDebug,
+  onOpenTokenStats,
 }: SettingsDialogProps) {
   const { settings, updateSettings } = useSettingsStore();
   const t = useT();
@@ -380,6 +382,15 @@ export default function SettingsDialog({
               {t("settings.viewLogs")}
             </button>
           )}
+          <button
+            onClick={() => onOpenTokenStats?.()}
+            className="w-full py-2 rounded-lg border border-border text-text-secondary
+                       hover:bg-bg-secondary hover:text-text-primary
+                       transition-colors text-sm font-medium flex items-center justify-center gap-2"
+          >
+            <BarChart2 size={14} />
+            {t("settings.tokenStats")}
+          </button>
           <button
             onClick={onClose}
             className="w-full py-2 rounded-lg bg-accent text-white hover:bg-accent-hover

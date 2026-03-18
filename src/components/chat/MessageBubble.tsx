@@ -622,8 +622,25 @@ export default function MessageBubble({
               : isLastAssistant && totalTokens > 0 ? totalTokens : null;
             const cost = message.turnMeta?.costUsd != null && message.turnMeta.costUsd > 0
               ? message.turnMeta.costUsd : null;
+            const outputTokens = message.turnMeta?.outputTokens;
+            const displayTokens = outputTokens != null && outputTokens > 0 ? outputTokens : tokens;
 
             const sep = <span className="text-text-muted/30">·</span>;
+
+            // Build tooltip for token breakdown
+            const meta = message.turnMeta;
+            const hasBreakdown = meta && (
+              (meta.inputTokens != null && meta.inputTokens > 0) ||
+              (meta.cacheCreationTokens != null && meta.cacheCreationTokens > 0) ||
+              (meta.cacheReadTokens != null && meta.cacheReadTokens > 0) ||
+              (meta.outputTokens != null && meta.outputTokens > 0)
+            );
+            const tokenTooltip = hasBreakdown && meta ? [
+              meta.inputTokens != null && meta.inputTokens > 0 ? `输入: ${meta.inputTokens.toLocaleString()}` : null,
+              meta.cacheCreationTokens != null && meta.cacheCreationTokens > 0 ? `缓存写: ${meta.cacheCreationTokens.toLocaleString()}` : null,
+              meta.cacheReadTokens != null && meta.cacheReadTokens > 0 ? `缓存读: ${meta.cacheReadTokens.toLocaleString()}` : null,
+              meta.outputTokens != null && meta.outputTokens > 0 ? `输出: ${meta.outputTokens.toLocaleString()}` : null,
+            ].filter(Boolean).join("  |  ") : null;
 
             return (
               <div className="flex items-center gap-1.5 px-1 mt-1.5 mb-2 text-[11px] text-text-muted/60 flex-wrap">
@@ -633,7 +650,7 @@ export default function MessageBubble({
                 </span>
                 {duration && <>{sep}<span className="flex items-center gap-1"><Timer size={10} className="shrink-0" />{duration}</span></>}
                 {message.model && <>{sep}<span className="px-1.5 py-px rounded bg-white/5 border border-white/8 font-mono text-[10px] text-text-muted/70">{message.model}</span></>}
-                {tokens != null && <>{sep}<span className="flex items-center gap-1"><Hash size={10} className="shrink-0" />{tokens.toLocaleString()} tokens</span></>}
+                {displayTokens != null && <>{sep}<span className="flex items-center gap-1" title={tokenTooltip || undefined}><Hash size={10} className="shrink-0" />{displayTokens.toLocaleString()} tokens</span></>}
                 {cost != null && <>{sep}<span className="flex items-center gap-1 text-emerald-400/60"><DollarSign size={10} className="shrink-0" />{cost.toFixed(4)}</span></>}
               </div>
             );

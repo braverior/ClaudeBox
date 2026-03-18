@@ -578,9 +578,10 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
   const handleStop = useCallback(async () => {
     if (currentSessionId) {
       try { await stopSession(currentSessionId); } catch { /* ignore */ }
+      handleStreamDone(currentSessionId);
       addSystemMessage(currentSessionId, "__stopped__");
     }
-  }, [currentSessionId, addSystemMessage]);
+  }, [currentSessionId, addSystemMessage, handleStreamDone]);
 
   const handleModelChange = useCallback(
     (model: string) => {
