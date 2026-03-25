@@ -212,6 +212,7 @@ html, body, #root {
   padding: 0 !important;
 }
 
+
 /* Diff: only font color, no background */
 .hljs-addition { color: var(--color-success); background: none !important; }
 .hljs-deletion { color: var(--color-error); background: none !important; }

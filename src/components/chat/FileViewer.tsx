@@ -91,6 +91,7 @@ interface EditableCodeAreaProps {
 function EditableCodeArea({ editContent, lang, onChange, onSave, lineNumbersRef }: EditableCodeAreaProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const preRef = useRef<HTMLPreElement>(null);
+  const [activeLine, setActiveLine] = useState(0);
 
   const highlightedHtml = useMemo(
     () => computeHighlightedHtml(editContent, lang),
@@ -99,9 +100,15 @@ function EditableCodeArea({ editContent, lang, onChange, onSave, lineNumbersRef 
 
   const lines = editContent.split("\n");
 
+  const updateActiveLine = useCallback((ta: HTMLTextAreaElement) => {
+    const line = ta.value.substring(0, ta.selectionStart).split("\n").length - 1;
+    setActiveLine(line);
+  }, []);
+
   const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     onChange(e.target.value);
-  }, [onChange]);
+    updateActiveLine(e.target);
+  }, [onChange, updateActiveLine]);
 
   const syncScroll = useCallback(() => {
     if (!textareaRef.current) return;
@@ -133,32 +140,39 @@ function EditableCodeArea({ editContent, lang, onChange, onSave, lineNumbersRef 
         if (textareaRef.current) {
           textareaRef.current.selectionStart = start + spaces.length;
           textareaRef.current.selectionEnd = start + spaces.length;
+          updateActiveLine(textareaRef.current);
         }
       });
     }
-  }, [editContent, onChange, onSave]);
+  }, [editContent, onChange, onSave, updateActiveLine]);
 
   return (
     <div className="flex flex-1 min-h-0 overflow-hidden bg-code-bg">
-      {/* Line numbers */}
+      {/* Line numbers — block divs naturally align with code rows */}
       <div
         ref={lineNumbersRef}
         aria-hidden
         className="flex-shrink-0 text-right py-3 pr-3 pl-3 select-none
-                   text-[0.75rem] leading-[1.6] text-text-muted/60 bg-code-bg
+                   text-[0.8rem] leading-[1.6] text-text-muted/60 bg-code-bg
                    border-r border-border/20 font-mono overflow-hidden"
       >
         {lines.map((_, i) => (
-          <div key={i}>{i + 1}</div>
+          <div
+            key={i}
+            className={i === activeLine ? "text-text-primary bg-white/[0.12] -mx-3 px-3" : ""}
+          >
+            {i + 1}
+          </div>
         ))}
       </div>
-      {/* Overlay: highlighted pre + transparent textarea (both scroll together) */}
+      {/* Code area */}
       <div className="relative flex-1 min-w-0 overflow-hidden">
         <pre
           ref={preRef}
           aria-hidden
-          className="absolute inset-0 py-3 px-3 m-0 pointer-events-none font-mono
-                     text-[0.8rem] leading-[1.6] overflow-hidden whitespace-pre-wrap [overflow-wrap:anywhere]"
+          className="file-editor-pre absolute inset-0 py-3 px-3 m-0 pointer-events-none font-mono
+                     text-[0.8rem] leading-[1.6] overflow-hidden whitespace-pre"
+          style={{ zIndex: 1 }}
         >
           <code
             className={lang ? `language-${lang} hljs` : "hljs"}
@@ -171,11 +185,14 @@ function EditableCodeArea({ editContent, lang, onChange, onSave, lineNumbersRef 
           onChange={handleChange}
           onScroll={syncScroll}
           onKeyDown={handleKeyDown}
+          onKeyUp={(e) => updateActiveLine(e.currentTarget)}
+          onClick={(e) => updateActiveLine(e.currentTarget)}
+          onSelect={(e) => updateActiveLine(e.currentTarget)}
           className="absolute inset-0 w-full h-full py-3 px-3 font-mono
                      text-[0.8rem] leading-[1.6] bg-transparent text-transparent resize-none
-                     border-none outline-none ring-0
-                     whitespace-pre-wrap [overflow-wrap:anywhere] overflow-auto
+                     border-none outline-none ring-0 whitespace-pre overflow-auto
                      [caret-color:#e2e8f0]"
+          style={{ zIndex: 3 }}
           spellCheck={false}
           autoComplete="off"
           autoCorrect="off"

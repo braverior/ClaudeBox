@@ -36,6 +36,10 @@ function detectAgentRuns(msgs: ChatMessage[]): { runs: Map<number, AgentRun>; hi
   for (let i = 0; i < msgs.length; i++) {
     const msg = msgs[i];
     if (msg.role !== "assistant") continue;
+    // If this message is already a child of another agent run, skip it as a parent.
+    // Without this, a nested Agent tool_use (already hidden) would run its own inner loop
+    // and incorrectly sweep subsequent text-only messages (visible break points) into hidden.
+    if (hidden.has(i)) continue;
 
     const agentBlock = msg.content.find(
       (b) => b.type === "tool_use" && b.name === "Agent"
