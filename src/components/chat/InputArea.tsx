@@ -574,7 +574,7 @@ export default function InputArea({
     const textarea = textareaRef.current;
     if (!textarea) return;
     textarea.style.height = "auto";
-    textarea.style.height = Math.min(textarea.scrollHeight, 200) + "px";
+    textarea.style.height = textarea.scrollHeight + "px";
   }, [input]);
 
   useEffect(() => {
@@ -619,7 +619,7 @@ export default function InputArea({
             className="w-full resize-none bg-transparent px-4 py-2
                        text-text-primary placeholder:text-text-muted
                        focus:outline-none disabled:cursor-not-allowed
-                       overflow-hidden text-[0.9375rem]"
+                       overflow-hidden text-[0.9375rem] break-words [word-break:break-all]"
           />
 
           {/* Bottom bar: attach + toolbar + send */}

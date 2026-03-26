@@ -168,14 +168,9 @@ function groupBlocks(blocks: ContentBlock[]): RenderItem[] {
         } else if (b.type === "tool_result") {
           j++; // skip, don't break
         } else if (b.type === "text") {
-          // Peek ahead: if there's another exploration tool after this text, absorb it
-          let k = j + 1;
-          while (k < blocks.length && blocks[k].type === "tool_result") k++;
-          if (k < blocks.length && blocks[k].type === "tool_use" && EXPLORATION_TOOLS.has(blocks[k].name || "")) {
-            j++; // absorb the text block
-          } else {
-            break; // text block not followed by exploration — stop group
-          }
+          // Never absorb text blocks — they must always be visible to the user.
+          // Break the group so text renders as a standalone item.
+          break;
         } else {
           break;
         }
@@ -382,8 +377,8 @@ export default function MessageBubble({
 
     return (
       <div className="flex justify-end mb-4 px-4">
-        <div className="flex items-start gap-2.5 max-w-[80%] min-w-0">
-          <div className="min-w-0 flex flex-col items-end gap-1.5">
+        <div className="flex items-start gap-2.5 max-w-[80%] min-w-0 w-fit">
+          <div className="min-w-0 w-full flex flex-col items-end gap-1.5">
             {/* Image previews */}
             {imageAtts.length > 0 && (
               <div className="flex flex-wrap gap-2 justify-end">
@@ -434,7 +429,7 @@ export default function MessageBubble({
               </div>
             )}
             {/* Message text */}
-            <div className="rounded-2xl rounded-tr-sm px-4 py-2.5 bg-user-bubble text-text-primary overflow-hidden min-w-0">
+            <div className="rounded-2xl rounded-tr-sm px-4 py-2.5 bg-user-bubble text-text-primary min-w-0 max-w-full">
               <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-[0.9375rem] leading-relaxed">
                 {message.content[0]?.text || ""}
               </p>
