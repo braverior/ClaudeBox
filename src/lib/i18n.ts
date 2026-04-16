@@ -181,6 +181,20 @@ const en: TranslationDict = {
   // Terminal
   "input.openTerminal": "Open in Terminal",
   "input.terminal": "Terminal",
+
+  // Lark Bot
+  "lark.title": "Lark Bot",
+  "lark.stopped": "Stopped",
+  "lark.connecting": "Connecting...",
+  "lark.connected": "Connected",
+  "lark.disconnected": "Disconnected",
+  "lark.reconnecting": "Reconnecting...",
+  "lark.error": "Error",
+  "lark.connect": "Connect",
+  "lark.disconnect": "Disconnect",
+  "lark.autoConnect": "Auto-connect on startup",
+  "lark.missingCredentials": "Please enter App ID and App Secret.",
+  "lark.hint": "Connect a Lark bot to remotely control Claude Code from your phone or any Lark client — send coding tasks, review results, and manage projects on the go via WebSocket (no public URL needed).",
 };
 
 const zh: TranslationDict = {
@@ -362,6 +376,20 @@ const zh: TranslationDict = {
   // Terminal
   "input.openTerminal": "在终端中打开",
   "input.terminal": "终端",
+
+  // Lark Bot
+  "lark.title": "飞书机器人",
+  "lark.stopped": "未连接",
+  "lark.connecting": "连接中...",
+  "lark.connected": "已连接",
+  "lark.disconnected": "已断开",
+  "lark.reconnecting": "重连中...",
+  "lark.error": "错误",
+  "lark.connect": "连接",
+  "lark.disconnect": "断开",
+  "lark.autoConnect": "启动时自动连接",
+  "lark.missingCredentials": "请输入 App ID 和 App Secret。",
+  "lark.hint": "配置飞书机器人后，可通过手机或任意飞书客户端远程操控 Claude Code —— 发送编码任务、查看执行结果、管理项目，随时随地 Remote Coding。使用 WebSocket 长连接，无需公网地址。",
 };
 
 const dictionaries: Record<string, TranslationDict> = { en, zh };

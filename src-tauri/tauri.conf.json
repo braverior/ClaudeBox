@@ -1,13 +1,13 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "ClaudeBox",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "identifier": "com.claudebox.desktop",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
     "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build:sidecar && npm run build"
+    "beforeBuildCommand": "npm run build:lark-sidecar && npm run build:sidecar && npm run build"
   },
   "app": {
     "windows": [
@@ -39,7 +39,8 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "../sidecar/bridge.bundle.mjs"
+      "../sidecar/bridge.bundle.mjs",
+      "../sidecar/lark-bot.bundle.mjs"
     ],
     "createUpdaterArtifacts": true
   },

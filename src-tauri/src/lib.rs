@@ -1,6 +1,8 @@
 mod claude;
+mod lark;
 
 use claude::ProcessManager;
+use lark::LarkProcessManager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -10,6 +12,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(ProcessManager::new())
+        .manage(LarkProcessManager::new())
         .setup(|app| {
             // Clean up stale clipboard images from previous sessions
             claude::cleanup_old_tmp_images();
@@ -49,6 +52,12 @@ pub fn run() {
             claude::storage_read,
             claude::storage_write,
             claude::storage_remove,
+            // Lark bot commands
+            lark::start_lark_bot,
+            lark::stop_lark_bot,
+            lark::get_lark_status,
+            lark::lark_send_notification,
+            lark::lark_send_command,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -5,7 +5,7 @@ import SettingsDialog from "./components/settings/SettingsDialog";
 import TokenStatsDialog from "./components/settings/TokenStatsDialog";
 import DebugPanel from "./components/debug/DebugPanel";
 import UpdateToast from "./components/UpdateToast";
-import { checkClaudeInstalled, applySystemProxy, emitDebug } from "./lib/claude-ipc";
+import { checkClaudeInstalled, applySystemProxy, emitDebug, sendMessage, onStream } from "./lib/claude-ipc";
 import {
   checkAndDownloadUpdate,
   applyUpdateAndRelaunch,
@@ -14,6 +14,8 @@ import {
 import { useSettingsStore } from "./stores/settingsStore";
 import { useChatStore } from "./stores/chatStore";
 import { useTokenUsageStore } from "./stores/tokenUsageStore";
+import { useLarkStore } from "./stores/larkStore";
+import { startLarkBot, onLarkEvent, larkSendNotification } from "./lib/lark-ipc";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Loader2, AlertTriangle } from "lucide-react";
 
@@ -63,6 +65,7 @@ export default function App() {
   const { settings, loaded: settingsLoaded, init: initSettings } = useSettingsStore();
   const { loaded: chatLoaded, init: initChat } = useChatStore();
   const { init: initTokenUsage } = useTokenUsageStore();
+  const { init: initLark, loaded: larkLoaded } = useLarkStore();
   // Fallback: force-show the app after 8s even if stores never finish loading
   // (guards against Tauri IPC hang on slow machines)
   const [forceReady, setForceReady] = useState(false);
@@ -70,7 +73,7 @@ export default function App() {
   // Initialize stores from file storage on mount
   useEffect(() => {
     const timer = setTimeout(() => setForceReady(true), 8000);
-    Promise.all([initSettings(), initChat(), initTokenUsage()])
+    Promise.all([initSettings(), initChat(), initTokenUsage(), initLark()])
       .catch(console.error)
       .finally(() => clearTimeout(timer));
     return () => clearTimeout(timer);
@@ -157,6 +160,172 @@ export default function App() {
     }).then((fn) => { unlisten = fn; });
     return () => unlisten?.();
   }, []);
+
+  // ── Lark: execute handler — routes Lark intent to main chat flow ──
+  const handleLarkExecute = useCallback(async (msg: { message_id: string; chat_id: string; prompt: string; project_path: string; summary: string }) => {
+    const chatStore = useChatStore.getState();
+    const larkStore = useLarkStore.getState();
+
+    const projectPath = msg.project_path || settings.workingDirectory || "";
+    if (!projectPath) {
+      emitDebug("error", "[lark] No project path for execution");
+      return;
+    }
+
+    // Find or create session for this project
+    const sessionId = chatStore.createSession(
+      projectPath,
+      settings.model || "claude-sonnet-4-20250514",
+      "auto"
+    );
+
+    // Track as Lark execution
+    larkStore.addLarkExecution({
+      sessionId,
+      chatId: msg.chat_id,
+      messageId: msg.message_id,
+      prompt: msg.prompt,
+      summary: msg.summary,
+      status: "running",
+      startedAt: Date.now(),
+    });
+
+    // Switch to this session so user sees it
+    chatStore.switchSession(sessionId);
+
+    // Add user message and start streaming
+    chatStore.addUserMessage(sessionId, `[飞书] ${msg.prompt}`);
+    chatStore.setStreaming(sessionId, true);
+
+    // Send through normal chat flow (same as manual typing)
+    try {
+      const session = chatStore.sessions.find((s) => s.id === sessionId);
+      const resumeId = session?.claudeSessionId || undefined;
+      await sendMessage({
+        session_id: sessionId,
+        message: msg.prompt,
+        cwd: projectPath,
+        model: settings.model || undefined,
+        permission_mode: "auto",
+        api_key: settings.apiKey || undefined,
+        base_url: settings.baseUrl || undefined,
+        resume_id: resumeId,
+      });
+    } catch (err) {
+      chatStore.handleStreamDone(sessionId, String(err));
+      larkStore.updateLarkExecution(sessionId, { status: "error" });
+      larkSendNotification(
+        msg.chat_id,
+        "执行失败",
+        `${msg.summary}\n\n错误: ${String(err)}`,
+        "error"
+      ).catch(() => {});
+    }
+  }, [settings]);
+
+  // ── Lark: completion monitor — sends status updates back to Lark ──
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    onStream((payload) => {
+      if (!payload.done) return;
+      const larkStore = useLarkStore.getState();
+      const execution = larkStore.getLarkExecution(payload.session_id);
+      if (!execution || execution.status !== "running") return;
+
+      const durationSec = Math.round((Date.now() - execution.startedAt) / 1000);
+      if (payload.error) {
+        larkStore.updateLarkExecution(payload.session_id, { status: "error" });
+        larkSendNotification(
+          execution.chatId,
+          "任务失败",
+          `${execution.summary}\n\n错误: ${payload.error}\n耗时: ${durationSec}秒`,
+          "error"
+        ).catch(() => {});
+      } else {
+        larkStore.updateLarkExecution(payload.session_id, { status: "completed" });
+        larkSendNotification(
+          execution.chatId,
+          "任务完成",
+          `${execution.summary}\n\n耗时: ${durationSec}秒`,
+          "end"
+        ).catch(() => {});
+      }
+    }).then((fn) => { unlisten = fn; });
+    return () => unlisten?.();
+  }, []);
+
+  // ── Lark bot: event listener ──
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    onLarkEvent((payload) => {
+      if (payload.done) {
+        useLarkStore.getState().setStatus("stopped");
+        return;
+      }
+      try {
+        const msg = JSON.parse(payload.data);
+        const larkStore = useLarkStore.getState();
+        const chatStore = useChatStore.getState();
+
+        if (msg.type === "status") {
+          larkStore.setStatus(msg.status);
+          if (msg.reason) larkStore.setError(msg.reason);
+        } else if (msg.type === "lark_message") {
+          larkStore.addMessage({
+            id: `${msg.message_id}-${Date.now()}`,
+            messageId: msg.message_id,
+            senderId: msg.sender_id,
+            content: msg.content,
+            timestamp: msg.timestamp,
+            status: "processing",
+          });
+        } else if (msg.type === "ai_reply") {
+          larkStore.updateMessage(msg.message_id, {
+            aiReply: msg.reply,
+            status: "replied",
+          });
+        } else if (msg.type === "task_created" && msg.task) {
+          larkStore.addTask(msg.task);
+          // Create a session for this task so it shows in sidebar
+          const projectDir = msg.task.projectPath || settings.workingDirectory || `lark://${msg.task.projectName || "task"}`;
+          const sessionId = chatStore.createSession(projectDir, settings.model || "claude-sonnet-4-20250514", "auto");
+          larkStore.setTaskSession(msg.task.id, sessionId);
+          chatStore.addSystemMessage(sessionId, `[飞书任务] ${msg.task.description}`);
+        } else if (msg.type === "task_updated") {
+          larkStore.updateTask(msg.task_id, { status: msg.status });
+        } else if (msg.type === "lark_execute") {
+          // AI understood intent — execute through main chat flow
+          handleLarkExecute(msg).catch((err) =>
+            emitDebug("error", `[lark] Execute failed: ${err}`)
+          );
+        } else if (msg.type === "error") {
+          larkStore.setError(msg.message);
+        }
+      } catch { /* ignore malformed */ }
+    }).then((fn) => { unlisten = fn; });
+    return () => unlisten?.();
+  }, []);
+
+  // ── Lark bot: auto-connect on startup ──
+  useEffect(() => {
+    if (!settingsLoaded || !larkLoaded) return;
+    const larkConfig = useLarkStore.getState().config;
+    if (!larkConfig.autoConnect) return;
+    if (!larkConfig.appId || !larkConfig.appSecret) return;
+
+    startLarkBot({
+      app_id: larkConfig.appId,
+      app_secret: larkConfig.appSecret,
+      project_dir: settings.workingDirectory || undefined,
+      model: settings.model || undefined,
+      api_key: settings.apiKey || undefined,
+      base_url: settings.baseUrl || undefined,
+    }).then(() => {
+      useLarkStore.getState().setStatus("connecting");
+    }).catch((err) => {
+      emitDebug("error", `[lark] Auto-connect failed: ${err}`);
+    });
+  }, [settingsLoaded, larkLoaded]);
 
   // Show loading screen until stores are ready (or timeout fires)
   if (!forceReady && (!settingsLoaded || !chatLoaded)) {

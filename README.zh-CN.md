@@ -12,6 +12,9 @@
   <a href="https://github.com/braverior/ClaudeBox/releases">
     <img src="https://img.shields.io/github/v/release/braverior/ClaudeBox?style=flat-square" alt="Release">
   </a>
+  <a href="https://github.com/braverior/ClaudeBox/releases">
+    <img src="https://img.shields.io/github/downloads/braverior/ClaudeBox/total?style=flat-square" alt="Downloads">
+  </a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-blue?style=flat-square" alt="Platform">
   <img src="https://img.shields.io/badge/Tauri-v2-orange?style=flat-square" alt="Tauri v2">
   <img src="https://img.shields.io/github/license/braverior/ClaudeBox?style=flat-square" alt="License">

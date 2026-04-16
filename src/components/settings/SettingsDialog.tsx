@@ -1,8 +1,17 @@
 import { useState, useEffect } from "react";
-import { X, CheckCircle, XCircle, Loader2, ScrollText, Plus, Trash2, Copy, Check, BarChart2 } from "lucide-react";
+import { X, CheckCircle, XCircle, Loader2, ScrollText, Plus, Trash2, Copy, Check, BarChart2, Bot } from "lucide-react";
 import { useSettingsStore } from "../../stores/settingsStore";
+import { useLarkStore, type LarkStatus } from "../../stores/larkStore";
 import { checkClaudeInstalled, checkModelAvailable, checkNodeVersion } from "../../lib/claude-ipc";
+import { startLarkBot, stopLarkBot } from "../../lib/lark-ipc";
 import { useT } from "../../lib/i18n";
+
+function LarkStatusDot({ status }: { status: LarkStatus }) {
+  if (status === "connected") return <span className="inline-block w-2 h-2 rounded-full bg-success" />;
+  if (status === "connecting" || status === "reconnecting") return <Loader2 size={10} className="animate-spin text-warning" />;
+  if (status === "error") return <span className="inline-block w-2 h-2 rounded-full bg-error" />;
+  return <span className="inline-block w-2 h-2 rounded-full bg-text-muted/40" />;
+}
 
 function getInstallInstructions(): { platform: string; command: string; note: string } {
   const ua = navigator.userAgent.toLowerCase();
@@ -60,6 +69,143 @@ function InstallInstructions() {
         </button>
       </div>
       <p className="text-[10px] text-text-muted mt-1.5">{info.note}</p>
+    </div>
+  );
+}
+
+function LarkSettingsSection() {
+  const t = useT();
+  const { settings } = useSettingsStore();
+  const { config, status, errorMessage, updateConfig, setStatus, setError } = useLarkStore();
+  const [larkConnecting, setLarkConnecting] = useState(false);
+
+  const statusLabel: Record<LarkStatus, string> = {
+    stopped: t("lark.stopped"),
+    connecting: t("lark.connecting"),
+    connected: t("lark.connected"),
+    disconnected: t("lark.disconnected"),
+    reconnecting: t("lark.reconnecting"),
+    error: t("lark.error"),
+  };
+
+  const handleToggle = async () => {
+    if (status === "connected" || status === "connecting" || status === "reconnecting") {
+      // Stop
+      try {
+        await stopLarkBot();
+        setStatus("stopped");
+        setError(null);
+      } catch (err) {
+        setError(String(err));
+      }
+    } else {
+      // Start
+      if (!config.appId || !config.appSecret) {
+        setError(t("lark.missingCredentials"));
+        return;
+      }
+      setLarkConnecting(true);
+      setError(null);
+      try {
+        await startLarkBot({
+          app_id: config.appId,
+          app_secret: config.appSecret,
+          project_dir: settings.workingDirectory || undefined,
+          model: settings.model || undefined,
+          api_key: settings.apiKey || undefined,
+          base_url: settings.baseUrl || undefined,
+        });
+        setStatus("connecting");
+      } catch (err) {
+        setError(String(err));
+        setStatus("error");
+      } finally {
+        setLarkConnecting(false);
+      }
+    }
+  };
+
+  const isRunning = status === "connected" || status === "connecting" || status === "reconnecting";
+
+  return (
+    <div className="rounded-xl border border-border bg-bg-secondary/50 p-4 space-y-3">
+      <div className="flex items-center gap-2 mb-1">
+        <Bot size={16} className="text-accent" />
+        <span className="text-sm font-medium text-text-primary">{t("lark.title")}</span>
+        <span className="ml-auto flex items-center gap-1.5 text-xs text-text-muted">
+          <LarkStatusDot status={status} />
+          {statusLabel[status]}
+        </span>
+      </div>
+
+      <div>
+        <label className="text-xs font-medium text-text-secondary block mb-1">
+          App ID
+        </label>
+        <input
+          type="text"
+          value={config.appId}
+          onChange={(e) => updateConfig({ appId: e.target.value })}
+          placeholder="cli_xxxxxxxx"
+          disabled={isRunning}
+          className="w-full rounded-lg bg-input-bg border border-border px-3 py-1.5 text-sm
+                     text-text-primary placeholder:text-text-muted
+                     focus:outline-none focus:ring-2 focus:ring-accent/50
+                     disabled:opacity-50"
+        />
+      </div>
+
+      <div>
+        <label className="text-xs font-medium text-text-secondary block mb-1">
+          App Secret
+        </label>
+        <input
+          type="password"
+          value={config.appSecret}
+          onChange={(e) => updateConfig({ appSecret: e.target.value })}
+          placeholder="••••••••"
+          disabled={isRunning}
+          className="w-full rounded-lg bg-input-bg border border-border px-3 py-1.5 text-sm
+                     text-text-primary placeholder:text-text-muted
+                     focus:outline-none focus:ring-2 focus:ring-accent/50
+                     disabled:opacity-50"
+        />
+      </div>
+
+      <div className="flex items-center justify-between">
+        <label className="flex items-center gap-2 text-xs text-text-secondary cursor-pointer">
+          <input
+            type="checkbox"
+            checked={config.autoConnect}
+            onChange={(e) => updateConfig({ autoConnect: e.target.checked })}
+            className="rounded border-border"
+          />
+          {t("lark.autoConnect")}
+        </label>
+
+        <button
+          onClick={handleToggle}
+          disabled={larkConnecting}
+          className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5
+            ${isRunning
+              ? "bg-error/10 text-error hover:bg-error/20 border border-error/30"
+              : "bg-accent text-white hover:bg-accent-hover"
+            } disabled:opacity-50`}
+        >
+          {larkConnecting ? (
+            <Loader2 size={12} className="animate-spin" />
+          ) : null}
+          {isRunning ? t("lark.disconnect") : t("lark.connect")}
+        </button>
+      </div>
+
+      {errorMessage && (
+        <p className="text-xs text-error">{errorMessage}</p>
+      )}
+
+      <p className="text-[10px] text-text-muted">
+        {t("lark.hint")}
+      </p>
     </div>
   );
 }
@@ -364,6 +510,9 @@ export default function SettingsDialog({
               {t("settings.baseUrlHint")}
             </p>
           </div>
+
+          {/* ── Lark Bot ───────────────────────────────────────── */}
+          <LarkSettingsSection />
         </div>
 
         {/* Footer */}

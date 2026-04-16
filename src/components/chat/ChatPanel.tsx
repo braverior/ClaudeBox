@@ -265,6 +265,7 @@ function BranchSwitcher({
   const [open, setOpen] = useState(false);
   const [branches, setBranches] = useState<string[]>([]);
   const [switching, setSwitching] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const t = useT();
 
@@ -283,6 +284,7 @@ function BranchSwitcher({
       setOpen(false);
       return;
     }
+    setError(null);
     try {
       const list = await listGitBranches(projectPath);
       // Put current branch first
@@ -300,14 +302,15 @@ function BranchSwitcher({
       return;
     }
     setSwitching(true);
+    setError(null);
     try {
       await checkoutGitBranch(projectPath, target);
       onBranchChange(target);
+      setOpen(false);
     } catch (e) {
-      console.error("Branch checkout failed:", e);
+      setError(String(e));
     } finally {
       setSwitching(false);
-      setOpen(false);
     }
   }, [branch, projectPath, onBranchChange]);
 
@@ -332,6 +335,9 @@ function BranchSwitcher({
       {open && (
         <div className="absolute top-full right-0 mt-1 min-w-[160px] max-w-[260px] max-h-[240px]
                         overflow-y-auto rounded-lg bg-bg-secondary border border-border shadow-xl z-50 py-1">
+          {error && (
+            <p className="px-3 py-1.5 text-[10px] text-error border-b border-border">{error}</p>
+          )}
           {branches.map((b) => (
             <button
               key={b}
@@ -458,14 +464,19 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
     setPullTriggered(false);
   }, [currentSessionId]);
 
-  // Fetch git branch when session changes
+  // Fetch git branch when session changes, poll every 5s to catch external changes
   useEffect(() => {
     setGitBranch(null);
-    if (currentSession?.projectPath) {
-      getGitBranch(currentSession.projectPath)
+    if (!currentSession?.projectPath) return;
+    const path = currentSession.projectPath;
+    const refresh = () => {
+      getGitBranch(path)
         .then((branch) => setGitBranch(branch))
-        .catch(() => setGitBranch(null));
-    }
+        .catch(() => {});
+    };
+    refresh();
+    const timer = setInterval(refresh, 5000);
+    return () => clearInterval(timer);
   }, [currentSession?.projectPath]);
 
   // Fetch git diff files when file panel is open, refresh every 5s

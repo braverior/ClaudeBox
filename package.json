@@ -1,20 +1,22 @@
 {
   "name": "claudebox",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "build:sidecar": "npx esbuild sidecar/bridge.mjs --bundle --platform=node --format=esm --outfile=sidecar/bridge.bundle.mjs --external:node:*",
+    "build:lark-sidecar": "npx esbuild sidecar/lark-bot.mjs --bundle --platform=node --format=esm --outfile=sidecar/lark-bot.bundle.mjs --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\"",
     "tauri": "tauri"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.74",
     "@anthropic-ai/claude-code": "^2.1.74",
+    "@larksuiteoapi/node-sdk": "^1.60.0",
     "@tailwindcss/vite": "^4.2.1",
     "@tauri-apps/api": "^2.10.1",
-    "@tauri-apps/plugin-dialog": "^2.6.0",
+    "@tauri-apps/plugin-dialog": "^2.7.0",
     "@tauri-apps/plugin-process": "^2.0.0",
     "@tauri-apps/plugin-shell": "^2.3.5",
     "@tauri-apps/plugin-updater": "^2.0.0",

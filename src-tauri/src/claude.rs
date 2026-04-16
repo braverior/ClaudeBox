@@ -359,7 +359,7 @@ fn get_shell_env() -> &'static HashMap<String, String> {
     })
 }
 
-fn command_with_path(program: &str) -> Command {
+pub fn command_with_path(program: &str) -> Command {
     // On Windows, wrap with `cmd /c` so that .cmd/.bat scripts (e.g. claude.cmd
     // from npm global install) are resolved via PATHEXT.
     // CREATE_NO_WINDOW (0x0800_0000) prevents a visible console window from
@@ -471,6 +471,60 @@ fn resolve_bridge_path() -> Result<String, String> {
     ))
 }
 
+/// Generic sidecar resolver — finds `dev_name` (dev mode) or `bundle_name` (production).
+/// Used by lark.rs to locate lark-bot.mjs / lark-bot.bundle.mjs.
+pub fn resolve_sidecar_path(dev_name: &str, bundle_name: &str) -> Result<String, String> {
+    let mut checked: Vec<String> = Vec::new();
+
+    // 1. Development: relative to CWD
+    let dev_path = std::env::current_dir()
+        .map(|p| p.join("sidecar").join(dev_name))
+        .unwrap_or_default();
+    checked.push(format!("cwd: {}", dev_path.display()));
+    if dev_path.exists() {
+        return Ok(clean_path(dev_path));
+    }
+
+    // 2. Paths relative to the executable
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            // Dev fallback
+            let dev_from_exe = parent.join("..").join("..").join("..").join("sidecar").join(dev_name);
+            checked.push(format!("dev(exe): {}", dev_from_exe.display()));
+            if dev_from_exe.exists() {
+                return Ok(clean_path(dev_from_exe));
+            }
+
+            // Production macOS
+            let mac_path = parent.join("..").join("Resources").join("_up_").join("sidecar").join(bundle_name);
+            checked.push(format!("macOS: {}", mac_path.display()));
+            if mac_path.exists() {
+                return Ok(clean_path(mac_path));
+            }
+
+            // Production Windows / Linux
+            let up_path = parent.join("_up_").join("sidecar").join(bundle_name);
+            checked.push(format!("win/linux(_up_): {}", up_path.display()));
+            if up_path.exists() {
+                return Ok(clean_path(up_path));
+            }
+
+            // Flat fallback
+            let same_dir = parent.join(bundle_name);
+            checked.push(format!("flat: {}", same_dir.display()));
+            if same_dir.exists() {
+                return Ok(clean_path(same_dir));
+            }
+        }
+    }
+
+    Err(format!(
+        "Cannot find sidecar/{}. Checked paths:\n{}",
+        dev_name,
+        checked.join("\n")
+    ))
+}
+
 // ── Debug event helper ───────────────────────────────────────────────
 
 #[derive(Clone, Serialize)]
@@ -481,7 +535,7 @@ pub struct DebugEvent {
     pub timestamp: u64,
 }
 
-fn emit_debug(app: &AppHandle, session_id: &str, level: &str, message: &str) {
+pub fn emit_debug(app: &AppHandle, session_id: &str, level: &str, message: &str) {
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()

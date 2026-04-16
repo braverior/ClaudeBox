@@ -265,6 +265,7 @@ function BranchDropdown({
   const [open, setOpen] = useState(false);
   const [branches, setBranches] = useState<string[]>([]);
   const [switching, setSwitching] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const t = useT();
 
@@ -283,6 +284,7 @@ function BranchDropdown({
       setOpen(false);
       return;
     }
+    setError(null);
     try {
       const list = await listGitBranches(projectPath);
       const sorted = [branch, ...list.filter((b) => b !== branch)];
@@ -299,14 +301,15 @@ function BranchDropdown({
       return;
     }
     setSwitching(true);
+    setError(null);
     try {
       await checkoutGitBranch(projectPath, target);
       onBranchChange(target);
+      setOpen(false);
     } catch (e) {
-      console.error("Branch checkout failed:", e);
+      setError(String(e));
     } finally {
       setSwitching(false);
-      setOpen(false);
     }
   }, [branch, projectPath, onBranchChange]);
 
@@ -331,6 +334,9 @@ function BranchDropdown({
       {open && (
         <div className="absolute bottom-full left-0 mb-1 min-w-[160px] max-w-[260px] max-h-[240px]
                         overflow-y-auto rounded-lg bg-bg-secondary border border-border shadow-xl z-50 py-1">
+          {error && (
+            <p className="px-3 py-1.5 text-[10px] text-error border-b border-border">{error}</p>
+          )}
           {branches.map((b) => (
             <button
               key={b}
@@ -574,7 +580,11 @@ export default function InputArea({
     const textarea = textareaRef.current;
     if (!textarea) return;
     textarea.style.height = "auto";
-    textarea.style.height = textarea.scrollHeight + "px";
+    // Cap at ~8 lines (8 × line-height 1.5 × 15px font ≈ 180px)
+    const maxH = 180;
+    const scrollH = textarea.scrollHeight;
+    textarea.style.height = Math.min(scrollH, maxH) + "px";
+    textarea.style.overflowY = scrollH > maxH ? "auto" : "hidden";
   }, [input]);
 
   useEffect(() => {
@@ -619,7 +629,7 @@ export default function InputArea({
             className="w-full resize-none bg-transparent px-4 py-2
                        text-text-primary placeholder:text-text-muted
                        focus:outline-none disabled:cursor-not-allowed
-                       overflow-hidden text-[0.9375rem] break-words [word-break:break-all]"
+                       text-[0.9375rem] break-words [word-break:break-all]"
           />
 
           {/* Bottom bar: attach + toolbar + send */}

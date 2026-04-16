@@ -5,10 +5,31 @@ on:
     tags:
       - 'v*'
 
+# ─────────────────────────────────────────────────────────────────────
+# Secrets required:
+#
+#   TAURI_SIGNING_PRIVATE_KEY          Tauri updater signing key
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD Passphrase for above
+#
+#   APPLE_CERTIFICATE                  Base64 .p12 (Developer ID Application)
+#   APPLE_CERTIFICATE_PASSWORD         Password for the .p12
+#   APPLE_SIGNING_IDENTITY             e.g. "Developer ID Application: Name (TEAMID)"
+#   APPLE_ID                           Apple ID email
+#   APPLE_ID_PASSWORD                  App-specific password
+#   APPLE_TEAM_ID                      10-char Team ID
+#   KEYCHAIN_PASSWORD                  Arbitrary password for CI temp keychain
+#
+#   HOMEBREW_TAP_TOKEN                 PAT with repo scope for braverior/homebrew-tap
+# ─────────────────────────────────────────────────────────────────────
+
 jobs:
+  # ═══════════════════════════════════════════════════════════════════
+  # Build + Sign + Release (per-platform)
+  # ═══════════════════════════════════════════════════════════════════
   release:
     permissions:
       contents: write
+
     strategy:
       fail-fast: false
       matrix:
@@ -48,15 +69,45 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Build sidecar
-        run: npm run build:sidecar
+      - name: Build sidecars
+        run: |
+          npm run build:sidecar
+          npm run build:lark-sidecar
 
+      # ── macOS: Import Developer ID certificate into CI keychain ──
+      - name: Import Apple signing certificate
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security import certificate.p12 -k build.keychain \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" build.keychain
+          rm certificate.p12
+
+      # ── Build, sign, notarize, and upload to GitHub Release ──
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Tauri updater signing
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # macOS code signing + notarization (tauri-action handles this natively)
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'ClaudeBox ${{ github.ref_name }}'
@@ -64,3 +115,122 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Update Homebrew Cask (runs after all builds finish)
+  # ═══════════════════════════════════════════════════════════════════
+  update-homebrew:
+    needs: release
+    runs-on: macos-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download release DMGs and compute SHA256
+        id: sha
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${{ steps.version.outputs.version }}"
+          mkdir -p /tmp/assets
+
+          # Download both DMGs (retry — draft assets may take a moment)
+          for i in 1 2 3; do
+            gh release download "$TAG" \
+              --repo braverior/ClaudeBox \
+              --pattern "ClaudeBox_${VERSION}_aarch64.dmg" \
+              --dir /tmp/assets 2>/dev/null && break
+            sleep 15
+          done
+
+          for i in 1 2 3; do
+            gh release download "$TAG" \
+              --repo braverior/ClaudeBox \
+              --pattern "ClaudeBox_${VERSION}_x64.dmg" \
+              --dir /tmp/assets 2>/dev/null && break
+            sleep 15
+          done
+
+          # Compute SHA256
+          SHA_ARM=""
+          SHA_X64=""
+          if [[ -f "/tmp/assets/ClaudeBox_${VERSION}_aarch64.dmg" ]]; then
+            SHA_ARM=$(shasum -a 256 "/tmp/assets/ClaudeBox_${VERSION}_aarch64.dmg" | awk '{print $1}')
+          fi
+          if [[ -f "/tmp/assets/ClaudeBox_${VERSION}_x64.dmg" ]]; then
+            SHA_X64=$(shasum -a 256 "/tmp/assets/ClaudeBox_${VERSION}_x64.dmg" | awk '{print $1}')
+          fi
+
+          echo "sha_arm=${SHA_ARM}" >> "$GITHUB_OUTPUT"
+          echo "sha_x64=${SHA_X64}" >> "$GITHUB_OUTPUT"
+
+          echo "ARM SHA256: ${SHA_ARM:-MISSING}"
+          echo "X64 SHA256: ${SHA_X64:-MISSING}"
+
+      - name: Update Homebrew Cask
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          SHA_ARM="${{ steps.sha.outputs.sha_arm }}"
+          SHA_X64="${{ steps.sha.outputs.sha_x64 }}"
+
+          # Clone the tap repo
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/braverior/homebrew-tap.git" /tmp/tap
+          mkdir -p /tmp/tap/Casks
+
+          # Generate cask formula
+          cat > /tmp/tap/Casks/claudebox.rb << CASK
+          cask "claudebox" do
+            version "${VERSION}"
+
+            on_arm do
+              url "https://github.com/braverior/ClaudeBox/releases/download/v#{version}/ClaudeBox_#{version}_aarch64.dmg"
+              sha256 "${SHA_ARM}"
+            end
+
+            on_intel do
+              url "https://github.com/braverior/ClaudeBox/releases/download/v#{version}/ClaudeBox_#{version}_x64.dmg"
+              sha256 "${SHA_X64}"
+            end
+
+            name "ClaudeBox"
+            desc "Native desktop GUI for Claude Code"
+            homepage "https://github.com/braverior/ClaudeBox"
+
+            livecheck do
+              url :url
+              strategy :github_latest
+            end
+
+            depends_on macos: ">= :ventura"
+
+            app "ClaudeBox.app"
+
+            zap trash: [
+              "~/.claudebox",
+              "~/Library/Application Support/com.claudebox.desktop",
+              "~/Library/Caches/com.claudebox.desktop",
+              "~/Library/Preferences/com.claudebox.desktop.plist",
+              "~/Library/Saved Application State/com.claudebox.desktop.savedState",
+            ]
+          end
+          CASK
+
+          # Fix heredoc indentation (remove leading 10 spaces)
+          sed -i '' 's/^          //' /tmp/tap/Casks/claudebox.rb
+
+          # Commit and push
+          cd /tmp/tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Casks/claudebox.rb
+          git diff --cached --quiet || {
+            git commit -m "claudebox ${VERSION}"
+            git push
+          }
