@@ -171,43 +171,44 @@ jobs:
           mkdir -p /tmp/tap/Casks
 
           cat > /tmp/tap/Casks/claudebox.rb << 'CASK'
-cask "claudebox" do
-  version "VERSION_PH"
+          cask "claudebox" do
+            version "VERSION_PH"
 
-  on_arm do
-    url "https://github.com/braverior/ClaudeBox/releases/download/v#{version}/ClaudeBox_#{version}_aarch64.dmg"
-    sha256 "SHA_ARM_PH"
-  end
+            on_arm do
+              url "https://github.com/braverior/ClaudeBox/releases/download/v#{version}/ClaudeBox_#{version}_aarch64.dmg"
+              sha256 "SHA_ARM_PH"
+            end
 
-  on_intel do
-    url "https://github.com/braverior/ClaudeBox/releases/download/v#{version}/ClaudeBox_#{version}_x64.dmg"
-    sha256 "SHA_X64_PH"
-  end
+            on_intel do
+              url "https://github.com/braverior/ClaudeBox/releases/download/v#{version}/ClaudeBox_#{version}_x64.dmg"
+              sha256 "SHA_X64_PH"
+            end
 
-  name "ClaudeBox"
-  desc "Native desktop GUI for Claude Code"
-  homepage "https://github.com/braverior/ClaudeBox"
+            name "ClaudeBox"
+            desc "Native desktop GUI for Claude Code"
+            homepage "https://github.com/braverior/ClaudeBox"
 
-  livecheck do
-    url :url
-    strategy :github_latest
-  end
+            livecheck do
+              url :url
+              strategy :github_latest
+            end
 
-  depends_on macos: ">= :ventura"
+            depends_on macos: ">= :ventura"
 
-  app "ClaudeBox.app"
+            app "ClaudeBox.app"
 
-  zap trash: [
-    "~/.claudebox",
-    "~/Library/Application Support/com.claudebox.desktop",
-    "~/Library/Caches/com.claudebox.desktop",
-    "~/Library/Preferences/com.claudebox.desktop.plist",
-    "~/Library/Saved Application State/com.claudebox.desktop.savedState",
-  ]
-end
-CASK
+            zap trash: [
+              "~/.claudebox",
+              "~/Library/Application Support/com.claudebox.desktop",
+              "~/Library/Caches/com.claudebox.desktop",
+              "~/Library/Preferences/com.claudebox.desktop.plist",
+              "~/Library/Saved Application State/com.claudebox.desktop.savedState",
+            ]
+          end
+          CASK
 
-          # Replace placeholders
+          # Strip leading 10 spaces from heredoc and replace placeholders
+          sed -i '' 's/^          //' /tmp/tap/Casks/claudebox.rb
           sed -i '' "s/VERSION_PH/${VERSION}/" /tmp/tap/Casks/claudebox.rb
           sed -i '' "s/SHA_ARM_PH/${SHA_ARM}/" /tmp/tap/Casks/claudebox.rb
           sed -i '' "s/SHA_X64_PH/${SHA_X64}/" /tmp/tap/Casks/claudebox.rb
