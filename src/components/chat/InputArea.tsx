@@ -88,6 +88,8 @@ interface InputAreaProps {
   hasClaudeSession?: boolean;
   /** Callback to clear the session memory */
   onClearSession?: () => void;
+  /** Current context token count for progress bar */
+  contextTokens?: number;
 }
 
 const ALL_TOOLS = [
@@ -424,6 +426,47 @@ function AttachmentChip({
   );
 }
 
+const CONTEXT_WINDOW = 200_000;
+
+function formatTokenCount(n: number): string {
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
+  return String(n);
+}
+
+function ContextProgressBar({ tokens }: { tokens?: number }) {
+  if (!tokens) return null;
+  const ratio = Math.min(1, tokens / CONTEXT_WINDOW);
+  const pct = Math.round(ratio * 100);
+  const fillColor =
+    ratio > 0.8
+      ? "bg-error"
+      : ratio > 0.6
+        ? "bg-warning"
+        : "bg-success";
+  const pctColor =
+    ratio > 0.8
+      ? "text-error"
+      : ratio > 0.6
+        ? "text-warning"
+        : "text-success";
+  const tooltip = `${formatTokenCount(tokens)} / ${formatTokenCount(CONTEXT_WINDOW)} tokens (${pct}%)`;
+
+  return (
+    <div
+      className="flex items-center gap-1.5 flex-shrink-0 cursor-default"
+      title={tooltip}
+    >
+      <div className="relative w-12 h-2 rounded-sm bg-text-muted/15 overflow-hidden">
+        <div
+          className={`absolute top-0 left-0 h-full ${fillColor} transition-all duration-500`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <span className={`text-[10px] tabular-nums leading-none font-medium ${pctColor}`}>{pct}%</span>
+    </div>
+  );
+}
+
 export default function InputArea({
   onSend,
   onStop,
@@ -441,6 +484,7 @@ export default function InputArea({
   allowedTools = [],
   onAllowedToolsChange,
   onClearSession,
+  contextTokens,
 }: InputAreaProps) {
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -660,6 +704,7 @@ export default function InputArea({
                       <Eraser size={12} className="flex-shrink-0" />
                       <span>{t("chat.clearSession")}</span>
                     </button>
+                    <ContextProgressBar tokens={contextTokens} />
                     <span className="text-border/40 flex-shrink-0">|</span>
                   </>
                 )}

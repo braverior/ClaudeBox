@@ -317,14 +317,25 @@ function makeCanUseTool(allowedTools, cwd) {
       return { behavior: "deny", message: resp.message || "User cancelled" };
     }
 
-    // ExitPlanMode — read plan file content, send to frontend, wait for approval
+    // ExitPlanMode — read plan content from input, send to frontend, wait for approval
     if (toolName === "ExitPlanMode") {
-      // Try to find and read the most recent plan file
       let planContent = "";
-      try {
-        planContent = findLatestPlanContent(cwd);
-      } catch (e) {
-        console.error(`[bridge] Failed to read plan file: ${e.message}`);
+      if (input.plan) {
+        planContent = input.plan;
+      } else if (input.planFilePath) {
+        try {
+          planContent = readFileSync(input.planFilePath, "utf-8");
+          console.error(`[bridge] Read plan from planFilePath: ${input.planFilePath}`);
+        } catch (e) {
+          console.error(`[bridge] Failed to read planFilePath: ${e.message}`);
+        }
+      }
+      if (!planContent) {
+        try {
+          planContent = findLatestPlanContent(cwd);
+        } catch (e) {
+          console.error(`[bridge] Fallback findLatestPlanContent failed: ${e.message}`);
+        }
       }
 
       const requestId = nextRequestId();
@@ -336,7 +347,7 @@ function makeCanUseTool(allowedTools, cwd) {
       });
       const resp = await waitForResponse(requestId);
       if (resp.behavior === "allow") {
-        return { behavior: "allow" };
+        return { behavior: "allow", updatedInput: input };
       }
       return {
         behavior: "deny",
@@ -392,8 +403,7 @@ function findLatestPlanContent(cwd) {
     } catch { /* dir doesn't exist */ }
   }
 
-  if (latestFile && Date.now() - latestMtime < 60000) {
-    // Only read if modified within the last 60 seconds (likely the current plan)
+  if (latestFile) {
     console.error(`[bridge] Reading plan file: ${latestFile}`);
     return readFileSync(latestFile, "utf-8");
   }

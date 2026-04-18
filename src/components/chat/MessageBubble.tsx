@@ -65,6 +65,19 @@ const TextBlock = memo(function TextBlock({ text }: { text: string }) {
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
         components={{
+          a({ href, children }) {
+            return (
+              <a
+                href={href}
+                onClick={(e) => {
+                  e.preventDefault();
+                  if (href) shellOpen(href).catch(() => {});
+                }}
+              >
+                {children}
+              </a>
+            );
+          },
           code(props: ComponentPropsWithoutRef<"code">) {
             const { className, children, ...rest } = props;
             const match = /language-(\w+)/.exec(className || "");

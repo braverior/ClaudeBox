@@ -49,6 +49,7 @@ pub fn run() {
             claude::write_file,
             claude::read_image_base64,
             claude::save_clipboard_image,
+            claude::get_context_tokens,
             claude::storage_read,
             claude::storage_write,
             claude::storage_remove,

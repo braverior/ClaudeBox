@@ -187,6 +187,10 @@ export async function saveClipboardImage(data: string, filename: string): Promis
   return invoke("save_clipboard_image", { data, filename });
 }
 
+export async function getContextTokens(sessionId: string, projectPath: string): Promise<number | null> {
+  return invoke("get_context_tokens", { sessionId, projectPath });
+}
+
 /**
  * Frontend-side debug event bus.
  * Used by modules like updater to emit logs visible in the Debug Panel.

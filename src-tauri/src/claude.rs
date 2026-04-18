@@ -1427,3 +1427,75 @@ pub fn storage_remove(key: String) -> Result<(), String> {
     }
     Ok(())
 }
+
+/// Read context token count from a Claude session JSONL file.
+/// Scans `~/.claude/projects/{encoded_path}/{session_id}.jsonl` from the end
+/// and returns `input_tokens + cache_creation_input_tokens + cache_read_input_tokens`
+/// from the last assistant message with usage data.
+#[tauri::command]
+pub fn get_context_tokens(session_id: String, project_path: String) -> Option<u64> {
+    let home = std::env::var("HOME").ok()?;
+    let home = std::path::PathBuf::from(home);
+    // Encode project path: replace non-alphanumeric with '-'
+    let encoded: String = project_path
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    let jsonl_path = home
+        .join(".claude")
+        .join("projects")
+        .join(&encoded)
+        .join(format!("{}.jsonl", session_id));
+
+    if !jsonl_path.exists() {
+        return None;
+    }
+
+    // Read last 100KB to find the most recent assistant message with usage
+    let file = std::fs::File::open(&jsonl_path).ok()?;
+    let file_len = file.metadata().ok()?.len();
+    let read_from = if file_len > 100_000 { file_len - 100_000 } else { 0 };
+
+    use std::io::{Seek, SeekFrom};
+    let mut reader = std::io::BufReader::new(file);
+    reader.seek(SeekFrom::Start(read_from)).ok()?;
+
+    // If we seeked into the middle of a line, skip the partial first line
+    if read_from > 0 {
+        let mut discard = String::new();
+        reader.read_line(&mut discard).ok()?;
+    }
+
+    let mut last_context: Option<u64> = None;
+    let mut line = String::new();
+    loop {
+        line.clear();
+        match reader.read_line(&mut line) {
+            Ok(0) => break,
+            Ok(_) => {}
+            Err(_) => break,
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty() { continue; }
+
+        // Quick check before full parse
+        if !trimmed.contains("\"input_tokens\"") { continue; }
+
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
+            if val.get("type").and_then(|t| t.as_str()) != Some("assistant") {
+                continue;
+            }
+            if let Some(usage) = val.pointer("/message/usage") {
+                let input = usage.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                let cache_create = usage.get("cache_creation_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                let cache_read = usage.get("cache_read_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                let ctx = input + cache_create + cache_read;
+                if ctx > 0 {
+                    last_context = Some(ctx);
+                }
+            }
+        }
+    }
+
+    last_context
+}

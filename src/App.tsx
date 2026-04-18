@@ -15,7 +15,7 @@ import { useSettingsStore } from "./stores/settingsStore";
 import { useChatStore } from "./stores/chatStore";
 import { useTokenUsageStore } from "./stores/tokenUsageStore";
 import { useLarkStore } from "./stores/larkStore";
-import { startLarkBot, onLarkEvent, larkSendNotification } from "./lib/lark-ipc";
+import { startLarkBot, onLarkEvent, larkSendNotification, larkSendCommand } from "./lib/lark-ipc";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Loader2, AlertTriangle } from "lucide-react";
 
@@ -228,11 +228,42 @@ export default function App() {
     let unlisten: (() => void) | undefined;
     onStream((payload) => {
       if (!payload.done) return;
+
+      // Extract last assistant message as summary
+      const msgs = useChatStore.getState().messages[payload.session_id] || [];
+      let lastMessage = "";
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role === "assistant") {
+          lastMessage = msgs[i].content
+            .filter((b) => b.type === "text")
+            .map((b) => b.text || "")
+            .join("\n")
+            .trim();
+          if (lastMessage) break;
+        }
+      }
+      if (lastMessage.length > 4000) lastMessage = lastMessage.slice(0, 4000) + "…";
+
+      // Sync completion to Lark bot sidecar (for all sessions, not just Lark-initiated)
+      const larkStatus = useLarkStore.getState().status;
+      if (larkStatus === "connected") {
+        larkSendCommand(JSON.stringify({
+          type: "app_activity",
+          session_id: payload.session_id,
+          status: payload.error ? "error" : "completed",
+          last_message: lastMessage,
+        })).catch(() => {});
+      }
+
+      // Lark-initiated execution: send notification card
       const larkStore = useLarkStore.getState();
       const execution = larkStore.getLarkExecution(payload.session_id);
       if (!execution || execution.status !== "running") return;
 
       const durationSec = Math.round((Date.now() - execution.startedAt) / 1000);
+      const summary = lastMessage
+        ? `${execution.summary}\n\n**执行结果：**\n${lastMessage}\n\n耗时: ${durationSec}秒`
+        : `${execution.summary}\n\n耗时: ${durationSec}秒`;
       if (payload.error) {
         larkStore.updateLarkExecution(payload.session_id, { status: "error" });
         larkSendNotification(
@@ -246,7 +277,7 @@ export default function App() {
         larkSendNotification(
           execution.chatId,
           "任务完成",
-          `${execution.summary}\n\n耗时: ${durationSec}秒`,
+          summary,
           "end"
         ).catch(() => {});
       }

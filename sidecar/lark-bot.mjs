@@ -50,6 +50,9 @@ let sessions = [];        // ClaudeBox sessions data (synced from frontend)
 let devTasks = [];         // Development tasks
 let taskIdCounter = 0;
 
+/** App-initiated sessions tracked for Lark visibility: sessionId → { sessionId, projectPath, prompt, status, startedAt } */
+let appActivities = [];
+
 /** @type {Map<string, { turns: Array<{role:string,content:string}>, lastActivity: number }>} chatId → conversation state */
 const conversationState = new Map();
 const CONVERSATION_EXPIRE_MS = 10 * 60 * 1000; // 10 minutes
@@ -97,17 +100,16 @@ function buildProjectSummary() {
     projects.get(path).sessions.push(s);
   }
 
-  const lines = ["以下是 ClaudeBox 中的项目列表：\n"];
+  const lines = [];
   for (const [, proj] of projects) {
     const count = proj.sessions.length;
     const lastSession = proj.sessions[proj.sessions.length - 1];
     const lastTime = lastSession?.updatedAt
       ? new Date(lastSession.updatedAt).toLocaleString("zh-CN")
       : "未知";
-    lines.push(`- **${proj.name}** (${proj.path})`);
-    lines.push(`  会话数: ${count}, 最近活跃: ${lastTime}`);
+    lines.push(`**${proj.name}**\n📂 \`${proj.path}\`\n💬 ${count} 个会话 · 最近活跃: ${lastTime}`);
   }
-  return lines.join("\n");
+  return lines.join("\n\n---\n\n");
 }
 
 // ── Dev Tasks ───────────────────────────────────────────────────────
@@ -137,13 +139,28 @@ function updateTask(taskId, status) {
 }
 
 function formatTaskList() {
-  if (devTasks.length === 0) return "当前没有开发任务。";
-  const lines = ["当前开发任务：\n"];
+  // Include both Lark-created tasks and app-initiated active sessions
+  const allItems = [];
+
   for (const t of devTasks) {
     const statusEmoji = t.status === "done" ? "✅" : t.status === "in_progress" ? "🔄" : "⏳";
-    lines.push(`${statusEmoji} [${t.id}] ${t.projectName}: ${t.description} (${t.status})`);
+    allItems.push(`${statusEmoji} **[${t.id}]** ${t.projectName}: ${t.description}\n状态: \`${t.status}\``);
   }
-  return lines.join("\n");
+
+  for (const a of appActivities) {
+    const elapsed = Math.round((Date.now() - a.startedAt) / 1000);
+    const statusEmoji = a.status === "completed" ? "✅" : a.status === "error" ? "❌" : "🔄";
+    const projectName = (a.projectPath || "").split("/").pop() || "未知项目";
+    let line = `${statusEmoji} **[APP]** ${projectName}: ${a.prompt}\n状态: \`${a.status}\` · 耗时: ${elapsed}秒`;
+    if (a.lastMessage) {
+      const truncated = a.lastMessage.length > 200 ? a.lastMessage.slice(0, 200) + "…" : a.lastMessage;
+      line += `\n\n> ${truncated.replace(/\n/g, "\n> ")}`;
+    }
+    allItems.push(line);
+  }
+
+  if (allItems.length === 0) return "当前没有开发任务。";
+  return allItems.join("\n\n---\n\n");
 }
 
 // ── Lark Notification Cards ─────────────────────────────────────────
@@ -154,6 +171,11 @@ function buildNotificationCard(title, content, cardType) {
     end: "blue",
     todo: "orange",
     error: "red",
+    green: "green",
+    blue: "blue",
+    orange: "orange",
+    red: "red",
+    purple: "purple",
   };
 
   return {
@@ -220,7 +242,7 @@ function parseCommand(text) {
 
   // /tasks — list tasks
   if (trimmed === "/tasks" || trimmed === "任务列表") {
-    return { isCommand: true, response: formatTaskList() };
+    return { isCommand: true, response: formatTaskList(), cardTitle: "📋 任务列表", cardType: "orange" };
   }
 
   // /task <project> <description> — create task
@@ -241,7 +263,9 @@ function parseCommand(text) {
     emit({ type: "task_created", task });
     return {
       isCommand: true,
-      response: `已创建开发任务 [${task.id}]：${projectName} — ${description}${projectPath ? `\n项目路径: ${projectPath}` : ""}`,
+      response: `已创建开发任务 **[${task.id}]**\n\n📦 项目: ${projectName}${projectPath ? `\n📂 路径: \`${projectPath}\`` : ""}\n📝 内容: ${description}`,
+      cardTitle: "✅ 任务已创建",
+      cardType: "green",
       triggerAI: true,
       aiPrompt: `请在项目 ${projectName}${projectPath ? ` (${projectPath})` : ""} 中执行以下开发任务：${description}`,
       aiCwd: projectPath || config?.project_dir || "",
@@ -254,9 +278,9 @@ function parseCommand(text) {
     const task = updateTask(doneMatch[1], "done");
     if (task) {
       emit({ type: "task_updated", task_id: task.id, status: "done" });
-      return { isCommand: true, response: `任务 [${task.id}] 已标记完成。` };
+      return { isCommand: true, response: `任务 **[${task.id}]** 已标记完成 ✅`, cardTitle: "任务完成", cardType: "blue" };
     }
-    return { isCommand: true, response: `未找到任务 ${doneMatch[1]}。` };
+    return { isCommand: true, response: `未找到任务 \`${doneMatch[1]}\``, cardTitle: "⚠️ 未找到", cardType: "orange" };
   }
 
   // /start <taskId> — start task
@@ -265,33 +289,33 @@ function parseCommand(text) {
     const task = updateTask(startMatch[1], "in_progress");
     if (task) {
       emit({ type: "task_updated", task_id: task.id, status: "in_progress" });
-      return { isCommand: true, response: `任务 [${task.id}] 已开始。` };
+      return { isCommand: true, response: `任务 **[${task.id}]** 已开始 🔄`, cardTitle: "任务开始", cardType: "green" };
     }
-    return { isCommand: true, response: `未找到任务 ${startMatch[1]}。` };
+    return { isCommand: true, response: `未找到任务 \`${startMatch[1]}\``, cardTitle: "⚠️ 未找到", cardType: "orange" };
   }
 
   // 项目列表 / "我有哪些项目"
   if (trimmed === "项目列表" || trimmed.includes("有哪些项目") || trimmed === "/projects") {
-    return { isCommand: true, response: buildProjectSummary() };
+    return { isCommand: true, response: buildProjectSummary(), cardTitle: "📂 项目列表", cardType: "blue" };
   }
 
   // /help
   if (trimmed === "/help" || trimmed === "帮助") {
     return {
       isCommand: true,
+      cardTitle: "📖 使用帮助",
+      cardType: "blue",
       response: [
-        "ClaudeBox 飞书机器人",
-        "",
         "直接发送消息，AI 会理解你的意图并在 ClaudeBox 中执行。",
         "例如：「帮我在 ClaudeBox 项目里修复登录 bug」",
         "",
-        "快捷指令：",
-        "/projects — 查看所有项目",
-        "/tasks — 查看开发任务",
-        "/task <项目名> <开发内容> — 创建开发任务",
-        "/start <任务ID> — 开始任务",
-        "/done <任务ID> — 完成任务",
-        "/help — 显示此帮助",
+        "**快捷指令：**",
+        "• `/projects` — 查看所有项目",
+        "• `/tasks` — 查看开发任务",
+        "• `/task <项目名> <开发内容>` — 创建开发任务",
+        "• `/start <任务ID>` — 开始任务",
+        "• `/done <任务ID>` — 完成任务",
+        "• `/help` — 显示此帮助",
       ].join("\n"),
     };
   }
@@ -452,11 +476,16 @@ async function handleLarkMessage(data) {
   const cmd = parseCommand(text);
   if (cmd.isCommand) {
     try {
+      const card = buildNotificationCard(
+        cmd.cardTitle || "ClaudeBox",
+        cmd.response,
+        cmd.cardType || "blue",
+      );
       await client.im.message.reply({
         path: { message_id: messageId },
         data: {
-          content: JSON.stringify({ text: cmd.response }),
-          msg_type: "text",
+          content: JSON.stringify(card),
+          msg_type: "interactive",
         },
       });
       emit({ type: "ai_reply", message_id: messageId, reply: cmd.response });
@@ -596,6 +625,32 @@ rl.on("line", (line) => {
         sessions = msg.sessions || [];
         console.error(`[lark-bot] Synced ${sessions.length} sessions`);
         break;
+
+      case "app_activity": {
+        const idx = appActivities.findIndex((a) => a.sessionId === msg.session_id);
+        if (msg.status === "running") {
+          if (idx === -1) {
+            appActivities.push({
+              sessionId: msg.session_id,
+              projectPath: msg.project_path || "",
+              prompt: msg.prompt || "",
+              lastMessage: "",
+              status: "running",
+              startedAt: Date.now(),
+            });
+          }
+        } else if (idx !== -1) {
+          appActivities[idx].status = msg.status;
+          if (msg.last_message) appActivities[idx].lastMessage = msg.last_message;
+        }
+        // Prune completed activities older than 30 minutes
+        const cutoff = Date.now() - 30 * 60 * 1000;
+        appActivities = appActivities.filter(
+          (a) => a.status === "running" || a.startedAt > cutoff
+        );
+        console.error(`[lark-bot] App activity: ${msg.session_id} → ${msg.status} (tracking ${appActivities.length})`);
+        break;
+      }
 
       case "stop":
         console.error("[lark-bot] Received stop command");

@@ -2,7 +2,9 @@ import React, { useEffect, useRef, useCallback, useState, useMemo, memo, useLayo
 import { useChatStore } from "../../stores/chatStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useTaskStore } from "../../stores/taskStore";
-import { sendMessage, stopSession, onStream, getGitBranch, listGitBranches, checkoutGitBranch, sendResponse, clearSessionResume, openInTerminal, gitDiffFiles } from "../../lib/claude-ipc";
+import { sendMessage, stopSession, onStream, getGitBranch, listGitBranches, checkoutGitBranch, sendResponse, clearSessionResume, openInTerminal, gitDiffFiles, getContextTokens } from "../../lib/claude-ipc";
+import { larkSendCommand } from "../../lib/lark-ipc";
+import { useLarkStore } from "../../stores/larkStore";
 import { getCurrentWindow, PhysicalSize } from "@tauri-apps/api/window";
 import { useT } from "../../lib/i18n";
 import { startWindowDrag } from "../../lib/utils";
@@ -14,7 +16,7 @@ import FileTree from "./FileTree";
 import FileViewer from "./FileViewer";
 import NewSessionDialog from "./NewSessionDialog";
 import { Sparkles, FolderOpen, Terminal, GitBranch, PanelRightClose, PanelRight, ChevronDown, ChevronRight, Loader2, CheckCircle, Check, FileText } from "lucide-react";
-import type { ChatMessage, ContentBlock, PendingInteraction } from "../../lib/stream-parser";
+import type { ChatMessage, ContentBlock } from "../../lib/stream-parser";
 
 interface ChatPanelProps {
   claudeAvailable: boolean;
@@ -101,15 +103,11 @@ const AgentRunContainer = memo(function AgentRunContainer({
   childMessages,
   isStreaming,
   hasResult,
-  pendingInteraction,
-  onRespond,
 }: {
   agentBlock: ContentBlock;
   childMessages: ChatMessage[];
   isStreaming: boolean;
   hasResult: boolean;
-  pendingInteraction?: PendingInteraction | null;
-  onRespond?: (response: Record<string, unknown>) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const t = useT();
@@ -241,8 +239,6 @@ const AgentRunContainer = memo(function AgentRunContainer({
               <ToolCallCard
                 block={block}
                 result={block.id ? resultMap.get(block.id) : undefined}
-                pendingInteraction={pendingInteraction}
-                onRespond={onRespond}
               />
             </div>
           </div>
@@ -416,6 +412,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
   >({});
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
   const [changedFiles, setChangedFiles] = useState<Set<string>>(new Set());
+  const [contextTokens, setContextTokens] = useState<number | null>(null);
   const [fileTreeRefreshKey, setFileTreeRefreshKey] = useState(0);
   const toolNameMapRef = useRef<Map<string, string>>(new Map());
 
@@ -478,6 +475,22 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
     const timer = setInterval(refresh, 5000);
     return () => clearInterval(timer);
   }, [currentSession?.projectPath]);
+
+  // Poll context tokens from JSONL session file every 5s
+  useEffect(() => {
+    setContextTokens(null);
+    const sessionId = currentSession?.claudeSessionId;
+    const projectPath = currentSession?.projectPath;
+    if (!sessionId || !projectPath) return;
+    const refresh = () => {
+      getContextTokens(sessionId, projectPath)
+        .then((tokens) => { if (tokens != null) setContextTokens(tokens); })
+        .catch(() => {});
+    };
+    refresh();
+    const timer = setInterval(refresh, 5000);
+    return () => clearInterval(timer);
+  }, [currentSession?.claudeSessionId, currentSession?.projectPath]);
 
   // Fetch git diff files when file panel is open, refresh every 5s
   useEffect(() => {
@@ -583,6 +596,16 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
           resume_id: resumeId,
         });
         addLaunchMessage(currentSessionId, pid, resumeId);
+        // Sync activity to Lark bot if connected
+        if (useLarkStore.getState().status === "connected") {
+          larkSendCommand(JSON.stringify({
+            type: "app_activity",
+            session_id: currentSessionId,
+            project_path: currentSession.projectPath,
+            prompt: content.slice(0, 100),
+            status: "running",
+          })).catch(() => {});
+        }
       } catch (err) {
         handleStreamDone(currentSessionId, String(err));
       }
@@ -936,8 +959,6 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
                           childMessages={agentRun.childIndices.map((j) => currentMessages[j])}
                           isStreaming={isStreaming}
                           hasResult={agentRun.hasResult}
-                          pendingInteraction={isLastAssistant ? pendingInteraction : undefined}
-                          onRespond={isLastAssistant ? handleRespond : undefined}
                         />
                       )}
                     </React.Fragment>
@@ -979,6 +1000,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
             onAllowedToolsChange={handleAllowedToolsChange}
             hasClaudeSession={!!currentSession?.claudeSessionId}
             onClearSession={handleClearSession}
+            contextTokens={contextTokens ?? undefined}
           />
         </div>
 
