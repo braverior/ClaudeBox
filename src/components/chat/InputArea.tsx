@@ -1,14 +1,15 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   Send, Square, AlertCircle, ChevronDown, ChevronUp, GitBranch,
   Wrench, Check, Plus, X, FileCode2, FileText,
-  Image, FileType, Terminal, Globe, Settings2, Cpu, Shield, Eraser,
-  Loader2, SquareTerminal,
+  Image, FileType, Terminal, Globe, Settings2, Cpu, Eraser,
+  Loader2, SquareTerminal, Zap, Search,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { readImageBase64, saveClipboardImage, listGitBranches, checkoutGitBranch } from "../../lib/claude-ipc";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { useT } from "../../lib/i18n";
+import { SKILL_CATEGORIES } from "../../lib/skills";
 
 export interface Attachment {
   path: string;
@@ -75,9 +76,7 @@ interface InputAreaProps {
   disabled?: boolean;
   model?: string;
   models?: string[];
-  permissionMode?: string;
   onModelChange?: (model: string) => void;
-  onPermissionModeChange?: (mode: string) => void;
   gitBranch?: string | null;
   projectPath?: string;
   onBranchChange?: (branch: string) => void;
@@ -359,6 +358,122 @@ function BranchDropdown({
   );
 }
 
+function SkillsPopover({
+  onSelect,
+}: {
+  onSelect: (skillName: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const t = useT();
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+        setSearch("");
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  useEffect(() => {
+    if (open) searchRef.current?.focus();
+  }, [open]);
+
+  const query = search.toLowerCase().trim();
+  const filtered = useMemo(() => {
+    if (!query) return SKILL_CATEGORIES;
+    return SKILL_CATEGORIES.map((cat) => ({
+      ...cat,
+      skills: cat.skills.filter(
+        (s) => s.name.toLowerCase().includes(query) || s.desc.toLowerCase().includes(query)
+      ),
+    })).filter((cat) => cat.skills.length > 0);
+  }, [query]);
+
+  const totalCount = filtered.reduce((n, c) => n + c.skills.length, 0);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 px-2 py-1 rounded-md text-xs
+                   text-text-secondary hover:text-text-primary hover:bg-bg-tertiary/50
+                   transition-colors"
+        title={t("input.skills")}
+      >
+        <Zap size={11} />
+        <span>{t("input.skills")}</span>
+        {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+      </button>
+      {open && (
+        <div className="absolute bottom-full left-0 mb-1 w-[280px] max-h-[min(400px,70vh)]
+                        rounded-lg bg-bg-secondary border border-border shadow-xl z-50
+                        flex flex-col overflow-hidden">
+          {/* Search */}
+          <div className="px-2 pt-2 pb-1.5 border-b border-border flex-shrink-0">
+            <div className="flex items-center gap-1.5 px-2 py-1.5 rounded-md bg-bg-primary border border-border">
+              <Search size={12} className="text-text-muted flex-shrink-0" />
+              <input
+                ref={searchRef}
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder={t("skill.search")}
+                className="flex-1 text-xs bg-transparent text-text-primary placeholder:text-text-muted
+                           focus:outline-none"
+              />
+              {search && (
+                <button
+                  onClick={() => setSearch("")}
+                  className="text-text-muted hover:text-text-primary"
+                >
+                  <X size={10} />
+                </button>
+              )}
+            </div>
+          </div>
+          {/* Skill list */}
+          <div className="overflow-y-auto flex-1 py-1">
+            {totalCount === 0 && (
+              <div className="px-3 py-4 text-center text-xs text-text-muted">
+                No skills found
+              </div>
+            )}
+            {filtered.map((cat) => (
+              <div key={cat.key}>
+                <div className="px-3 pt-2 pb-1 text-[10px] font-semibold text-text-muted uppercase tracking-wider">
+                  {cat.label}
+                </div>
+                {cat.skills.map((skill) => (
+                  <button
+                    key={skill.name}
+                    onClick={() => {
+                      onSelect(skill.name);
+                      setOpen(false);
+                      setSearch("");
+                    }}
+                    className="flex items-center gap-2 w-full text-left px-3 py-1.5 text-xs
+                               text-text-secondary hover:text-text-primary hover:bg-bg-tertiary/30
+                               transition-colors"
+                  >
+                    <span className="text-accent font-mono flex-shrink-0">/{skill.name.split(":").pop()}</span>
+                    <span className="text-text-muted truncate">{skill.desc}</span>
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Single attachment chip */
 function AttachmentChip({
   att,
@@ -474,9 +589,7 @@ export default function InputArea({
   disabled,
   model = "",
   models = [],
-  permissionMode = "",
   onModelChange,
-  onPermissionModeChange,
   gitBranch,
   projectPath,
   onBranchChange,
@@ -490,6 +603,11 @@ export default function InputArea({
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const t = useT();
+
+  const handleSkillSelect = useCallback((skillName: string) => {
+    setInput(`/${skillName} `);
+    setTimeout(() => textareaRef.current?.focus(), 0);
+  }, []);
 
   const handleAttach = useCallback(async () => {
     try {
@@ -690,7 +808,7 @@ export default function InputArea({
             </button>
 
             {/* Inline toolbar */}
-            {onModelChange && onPermissionModeChange && (
+            {onModelChange && (
               <div className="flex items-center gap-0.5 min-w-0 flex-wrap">
                 {/* New session button */}
                 {onClearSession && (
@@ -728,17 +846,7 @@ export default function InputArea({
                   />
                 )}
                 <span className="text-border/40 flex-shrink-0">|</span>
-                <DropdownSelect
-                  value={permissionMode}
-                  options={[
-                    { value: "", label: t("mode.default") },
-                    { value: "auto", label: t("mode.auto") },
-                    { value: "plan", label: t("mode.plan") },
-                  ]}
-                  onChange={onPermissionModeChange}
-                  icon={<Shield size={12} className="flex-shrink-0" />}
-                  tooltip={t("input.mode")}
-                />
+                <SkillsPopover onSelect={handleSkillSelect} />
                 {onAllowedToolsChange && (
                   <>
                     <span className="text-border/40 flex-shrink-0">|</span>

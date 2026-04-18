@@ -5,6 +5,7 @@ import type {
   ContentBlock,
   StreamMessage,
   PendingInteraction,
+  AnsweredToolData,
 } from "../lib/stream-parser";
 import { useTaskStore } from "./taskStore";
 import { v4Style } from "../lib/utils";
@@ -44,6 +45,8 @@ interface ChatState {
   streamError: string | null;
   /** Pending interactive tool request (AskUserQuestion / ExitPlanMode) */
   pendingInteraction: PendingInteraction | null;
+  /** Persisted answered state for interactive tools, keyed by tool_use block ID */
+  answeredTools: Record<string, AnsweredToolData>;
   /** Whether the store has finished loading from persistent storage */
   loaded: boolean;
 
@@ -66,6 +69,8 @@ interface ChatState {
   clearError: () => void;
   /** Clear the pending interaction after it has been responded to */
   clearPendingInteraction: () => void;
+  /** Mark an interactive tool as answered, persisting data across re-renders */
+  setToolAnswered: (toolUseId: string, data: AnsweredToolData) => void;
 }
 
 // ── File storage keys ───────────────────────────────────────────────
@@ -222,6 +227,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   streamingSessions: {},
   streamError: null,
   pendingInteraction: null,
+  answeredTools: {},
   loaded: false,
 
   init: async () => {
@@ -421,6 +427,36 @@ export const useChatStore = create<ChatState>((set, get) => ({
           set({ sessions });
         }
 
+        // Handle compaction status events
+        if (event.subtype === "status" && event.status === "compacting") {
+          msgs.push({
+            id: v4Style(),
+            role: "system",
+            content: [{ type: "text", text: "__compacting__" }],
+            timestamp: Date.now(),
+            isStreaming: true,
+          });
+        } else if (event.subtype === "compact_boundary" && event.compact_metadata) {
+          const compactIdx = msgs.findIndex(
+            (m) => m.role === "system" && m.content[0]?.text === "__compacting__"
+          );
+          const preTokens = event.compact_metadata.pre_tokens;
+          if (compactIdx >= 0) {
+            msgs[compactIdx] = {
+              ...msgs[compactIdx],
+              isStreaming: false,
+              content: [{ type: "text", text: `__compacted__:${preTokens}` }],
+            };
+          } else {
+            msgs.push({
+              id: v4Style(),
+              role: "system",
+              content: [{ type: "text", text: `__compacted__:${preTokens}` }],
+              timestamp: Date.now(),
+            });
+          }
+        }
+
         const launchIdx = msgs.findIndex(
           (m) => m.role === "assistant" && m.streamMessageId === "__launch__"
         );
@@ -570,12 +606,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
             msgs[i] = { ...msgs[i], isStreaming: false };
           }
         }
-        set({ streamingSessions: { ...get().streamingSessions, [sessionId]: false }, pendingInteraction: null });
+        set({
+          streamingSessions: { ...get().streamingSessions, [sessionId]: false },
+          pendingInteraction: get().pendingInteraction?.sessionId === sessionId ? null : get().pendingInteraction,
+        });
       } else if (event.type === "ask_user" && event.requestId) {
         set({
           pendingInteraction: {
             type: "ask_user",
             requestId: event.requestId,
+            sessionId,
             questions: event.questions,
           },
         });
@@ -584,6 +624,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           pendingInteraction: {
             type: "exit_plan",
             requestId: event.requestId,
+            sessionId,
             input: event.input,
             planContent: event.planContent,
           },
@@ -629,4 +670,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   }),
   clearError: () => set({ streamError: null }),
   clearPendingInteraction: () => set({ pendingInteraction: null }),
+  setToolAnswered: (toolUseId, data) => set({
+    answeredTools: { ...get().answeredTools, [toolUseId]: data },
+  }),
 }));

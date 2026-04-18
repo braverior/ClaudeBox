@@ -624,13 +624,6 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
     [currentSessionId, updateSession]
   );
 
-  const handlePermissionModeChange = useCallback(
-    (permissionMode: string) => {
-      if (currentSessionId) updateSession(currentSessionId, { permissionMode });
-    },
-    [currentSessionId, updateSession]
-  );
-
   const handleAllowedToolsChange = useCallback(
     (allowedTools: string[]) => {
       if (currentSessionId) updateSession(currentSessionId, { allowedTools });
@@ -989,9 +982,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
             disabled={!claudeAvailable}
             model={currentSession?.model || ""}
             models={settings.models}
-            permissionMode={currentSession?.permissionMode || ""}
             onModelChange={handleModelChange}
-            onPermissionModeChange={handlePermissionModeChange}
             gitBranch={gitBranch}
             projectPath={currentSession?.projectPath}
             onBranchChange={setGitBranch}

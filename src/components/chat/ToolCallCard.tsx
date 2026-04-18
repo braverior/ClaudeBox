@@ -19,9 +19,13 @@ import {
   MessageCircleQuestion,
   ClipboardCheck,
 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfmSafe from "../../lib/remark-gfm-safe";
 import type { ContentBlock, PendingInteraction } from "../../lib/stream-parser";
+import { useChatStore } from "../../stores/chatStore";
 import { openInBrowser } from "../../lib/claude-ipc";
 import { useT } from "../../lib/i18n";
+import { open as shellOpen } from "@tauri-apps/plugin-shell";
 
 const TOOL_ICONS: Record<string, React.ReactNode> = {
   Read: <FileText size={14} />,
@@ -66,22 +70,27 @@ function detectLocalUrl(text: string): string | null {
 interface ToolCallCardProps {
   block: ContentBlock;
   result?: ContentBlock;
-  /** Pending interactive request matching this tool call (if any) */
   pendingInteraction?: PendingInteraction | null;
-  /** Callback when the user responds to an interactive tool */
   onRespond?: (response: Record<string, unknown>) => void;
 }
 
 export default function ToolCallCard({ block, result, pendingInteraction, onRespond }: ToolCallCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [customInputs, setCustomInputs] = useState<Record<string, string>>({});
-  const [answered, setAnswered] = useState(false);
+  const [planExpanded, setPlanExpanded] = useState(false);
   const t = useT();
   const toolName = block.name || "Tool";
   const icon = TOOL_ICONS[toolName] || <Terminal size={14} />;
   const input = block.input || {};
   const isError = result?.is_error;
   const isDone = !!result;
+
+  // Store-backed answered state — survives re-renders and concurrent session events
+  const answeredData = useChatStore((s) => block.id ? s.answeredTools[block.id] : undefined);
+  const setToolAnswered = useChatStore((s) => s.setToolAnswered);
+  const answered = !!answeredData;
+  const savedAnswers = answeredData?.type === "ask_user" ? answeredData.answers : [];
+  const savedPlanContent = answeredData?.type === "exit_plan" ? answeredData.planContent : "";
 
   // Check if this tool call is the one with a pending interaction
   const isAskUser = toolName === "AskUserQuestion" && pendingInteraction?.type === "ask_user" && !answered;
@@ -159,23 +168,38 @@ export default function ToolCallCard({ block, result, pendingInteraction, onResp
 
   const handleSelectAnswer = (questionText: string, answer: string) => {
     setAnswers((prev) => ({ ...prev, [questionText]: answer }));
+    setCustomInputs((prev) => ({ ...prev, [questionText]: "" }));
   };
 
   const handleSubmitAnswers = () => {
-    if (!onRespond || !pendingInteraction) return;
-    setAnswered(true);
+    if (!onRespond || !pendingInteraction || !block.id) return;
+    // Merge: prefer custom text input over option selection when custom text is non-empty
+    const finalAnswers: Record<string, string> = { ...answers };
+    for (const [q, text] of Object.entries(customInputs)) {
+      if (text.trim()) finalAnswers[q] = text.trim();
+    }
+    if (pendingInteraction.questions) {
+      setToolAnswered(block.id, {
+        type: "ask_user",
+        answers: pendingInteraction.questions.map(
+          (q) => ({ question: q.question, answer: finalAnswers[q.question] || "—" })
+        ),
+      });
+    }
     onRespond({
       type: "response",
       requestId: pendingInteraction.requestId,
       behavior: "allow",
-      answers,
+      answers: finalAnswers,
     });
   };
 
-  /** For single-question: answer immediately on click */
   const handleQuickAnswer = (questionText: string, answer: string) => {
-    if (!onRespond || !pendingInteraction) return;
-    setAnswered(true);
+    if (!onRespond || !pendingInteraction || !block.id) return;
+    setToolAnswered(block.id, {
+      type: "ask_user",
+      answers: [{ question: questionText, answer }],
+    });
     onRespond({
       type: "response",
       requestId: pendingInteraction.requestId,
@@ -185,8 +209,11 @@ export default function ToolCallCard({ block, result, pendingInteraction, onResp
   };
 
   const handleExitPlanApprove = () => {
-    if (!onRespond || !pendingInteraction) return;
-    setAnswered(true);
+    if (!onRespond || !pendingInteraction || !block.id) return;
+    setToolAnswered(block.id, {
+      type: "exit_plan",
+      planContent: pendingInteraction?.planContent || "",
+    });
     onRespond({
       type: "response",
       requestId: pendingInteraction.requestId,
@@ -195,8 +222,12 @@ export default function ToolCallCard({ block, result, pendingInteraction, onResp
   };
 
   const handleExitPlanReject = (reason?: string) => {
-    if (!onRespond || !pendingInteraction) return;
-    setAnswered(true);
+    if (!onRespond || !pendingInteraction || !block.id) return;
+    setToolAnswered(block.id, {
+      type: "exit_plan",
+      planContent: pendingInteraction?.planContent || "",
+      rejected: true,
+    });
     onRespond({
       type: "response",
       requestId: pendingInteraction.requestId,
@@ -261,9 +292,12 @@ export default function ToolCallCard({ block, result, pendingInteraction, onResp
                   type="text"
                   placeholder={t("tool.other")}
                   value={customInputs[q.question] || ""}
-                  onChange={(e) =>
-                    setCustomInputs({ ...customInputs, [q.question]: e.target.value })
-                  }
+                  onChange={(e) => {
+                    setCustomInputs({ ...customInputs, [q.question]: e.target.value });
+                    if (e.target.value.trim()) {
+                      setAnswers((prev) => { const next = { ...prev }; delete next[q.question]; return next; });
+                    }
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && customInputs[q.question]?.trim()) {
                       if (isSingleQuestion) {
@@ -296,17 +330,22 @@ export default function ToolCallCard({ block, result, pendingInteraction, onResp
             </div>
           ))}
           {/* Submit All button for multi-question */}
-          {!isSingleQuestion && (
-            <button
-              onClick={handleSubmitAnswers}
-              disabled={Object.keys(answers).length < questions.length}
-              className="px-4 py-1.5 text-sm rounded-lg bg-accent text-white font-medium
-                         hover:bg-accent/80 disabled:opacity-40 disabled:cursor-not-allowed
-                         transition-colors"
-            >
-              {t("tool.submitAnswers")} ({Object.keys(answers).length}/{questions.length})
-            </button>
-          )}
+          {!isSingleQuestion && (() => {
+            const answeredCount = questions.filter(
+              (q) => answers[q.question] || customInputs[q.question]?.trim()
+            ).length;
+            return (
+              <button
+                onClick={handleSubmitAnswers}
+                disabled={answeredCount < questions.length}
+                className="px-4 py-1.5 text-sm rounded-lg bg-accent text-white font-medium
+                           hover:bg-accent/80 disabled:opacity-40 disabled:cursor-not-allowed
+                           transition-colors"
+              >
+                {t("tool.submitAnswers")} ({answeredCount}/{questions.length})
+              </button>
+            );
+          })()}
         </div>
       </div>
     );
@@ -327,13 +366,25 @@ export default function ToolCallCard({ block, result, pendingInteraction, onResp
           <span className="text-sm font-medium text-text-primary">{t("tool.planReady")}</span>
         </div>
         <div className="px-3 py-3">
-          {/* Plan content preview */}
           {planContent && (
             <div className="mb-3">
               <div className="text-xs text-text-muted mb-1">{t("tool.plan")}</div>
-              <pre className="text-xs bg-code-bg rounded p-3 max-h-64 overflow-y-auto whitespace-pre-wrap text-text-secondary">
-                {planContent}
-              </pre>
+              <div className="text-sm bg-code-bg rounded p-3 max-h-64 overflow-y-auto prose prose-sm prose-invert max-w-none
+                              prose-headings:text-text-primary prose-p:text-text-secondary prose-li:text-text-secondary
+                              prose-strong:text-text-primary prose-code:text-accent prose-code:bg-transparent">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfmSafe]}
+                  components={{
+                    a: ({ href, children }) => (
+                      <a
+                        href={href}
+                        onClick={(e) => { e.preventDefault(); if (href) shellOpen(href); }}
+                        className="text-accent hover:underline cursor-pointer"
+                      >{children}</a>
+                    ),
+                  }}
+                >{planContent}</ReactMarkdown>
+              </div>
             </div>
           )}
           {allowedPrompts.length > 0 && (
@@ -372,6 +423,68 @@ export default function ToolCallCard({ block, result, pendingInteraction, onResp
   }
 
   // ── Render: Answered state for interactive tools ─────────────────
+
+  if (answered && toolName === "ExitPlanMode" && savedPlanContent) {
+    return (
+      <div className="rounded-lg border border-border bg-tool-bg overflow-hidden">
+        <button
+          onClick={() => setPlanExpanded(!planExpanded)}
+          className="flex items-center gap-2 w-full px-3 py-1.5 text-sm hover:bg-bg-secondary/50 transition-colors"
+        >
+          {planExpanded ? (
+            <ChevronDown size={12} className="text-text-muted flex-shrink-0" />
+          ) : (
+            <ChevronRight size={12} className="text-text-muted flex-shrink-0" />
+          )}
+          <span className="text-accent flex-shrink-0">{icon}</span>
+          <span className="text-text-secondary text-xs flex-1 text-left">{t("tool.planApprove")}</span>
+          <CheckCircle size={13} className="text-success" />
+        </button>
+        {planExpanded && (
+          <div className="px-3 pb-3 border-t border-border">
+            <div className="text-sm bg-code-bg rounded p-3 mt-2 max-h-96 overflow-y-auto prose prose-sm prose-invert max-w-none
+                            prose-headings:text-text-primary prose-p:text-text-secondary prose-li:text-text-secondary
+                            prose-strong:text-text-primary prose-code:text-accent prose-code:bg-transparent">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfmSafe]}
+                components={{
+                  a: ({ href, children }) => (
+                    <a
+                      href={href}
+                      onClick={(e) => { e.preventDefault(); if (href) shellOpen(href); }}
+                      className="text-accent hover:underline cursor-pointer"
+                    >{children}</a>
+                  ),
+                }}
+              >{savedPlanContent}</ReactMarkdown>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (answered && toolName === "AskUserQuestion" && savedAnswers.length > 0) {
+    return (
+      <div className="rounded-lg border border-border bg-tool-bg overflow-hidden">
+        <div className="flex items-center gap-2 px-3 py-1.5 text-sm">
+          <span className="text-accent flex-shrink-0">{icon}</span>
+          <span className="text-text-secondary text-xs flex-1">{summary}</span>
+          <CheckCircle size={13} className="text-success" />
+        </div>
+        <div className="px-3 pb-2.5 space-y-1.5">
+          {savedAnswers.map((qa, i) => (
+            <div key={i} className="flex items-baseline gap-2 text-xs">
+              <span className="text-text-muted flex-shrink-0">Q{savedAnswers.length > 1 ? i + 1 : ""}:</span>
+              <span className="text-text-secondary">{qa.question}</span>
+              <span className="text-text-muted flex-shrink-0">→</span>
+              <span className="text-accent font-medium">{qa.answer}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   if (answered && (toolName === "AskUserQuestion" || toolName === "ExitPlanMode")) {
     return (

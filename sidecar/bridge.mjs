@@ -513,6 +513,7 @@ async function main() {
       switch (message.type) {
         case "system": {
           // The init message — includes session_id, tools, model, etc.
+          // Also handles status updates (compacting) and compact_boundary events
           emit({
             type: "system",
             subtype: message.subtype,
@@ -520,6 +521,8 @@ async function main() {
             tools: message.tools,
             model: message.model,
             cwd: message.cwd,
+            status: message.status,
+            compact_metadata: message.compact_metadata,
           });
           break;
         }

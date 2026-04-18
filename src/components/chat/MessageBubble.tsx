@@ -6,7 +6,7 @@ import CodeBlock from "./CodeBlock";
 import ToolCallCard, { shortPath } from "./ToolCallCard";
 import { formatTimeWithSeconds, formatDuration } from "../../lib/utils";
 import { useT, type TFunction } from "../../lib/i18n";
-import { User, Loader2, Brain, ChevronDown, ChevronRight, Info, FileCode2, FileText, Image, FileType, Terminal, Globe, Settings2, Rocket, Sparkles, Layers, CheckCircle, CircleStop, Clock, Timer, Hash, DollarSign } from "lucide-react";
+import { User, Loader2, Brain, ChevronDown, ChevronRight, Info, FileCode2, FileText, Image, FileType, Terminal, Globe, Settings2, Rocket, Sparkles, Layers, CheckCircle, CircleStop, Clock, Timer, Hash, DollarSign, RefreshCw } from "lucide-react";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import type { ComponentPropsWithoutRef } from "react";
 
@@ -341,7 +341,6 @@ interface MessageBubbleProps {
   pendingInteraction?: PendingInteraction | null;
   /** Callback when user responds to an interactive tool */
   onRespond?: (response: Record<string, unknown>) => void;
-  /** If set, skip rendering this Agent tool_use block (rendered by AgentRunContainer instead) */
   skipAgentBlockId?: string;
 }
 
@@ -472,6 +471,44 @@ export default function MessageBubble({
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-orange-500/5 border border-orange-500/20">
                 <span className="text-xs text-orange-400">{t("chat.stoppedByUser")}</span>
+                <span className="text-[10px] text-text-muted">{formatTimeWithSeconds(message.timestamp)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Special card for context compaction
+    if (text === "__compacting__" || text.startsWith("__compacted__:")) {
+      const isCompacting = text === "__compacting__";
+      const preTokens = !isCompacting ? parseInt(text.split(":")[1], 10) : 0;
+      return (
+        <div className="flex justify-start px-4 mb-1.5 mt-1">
+          <div className="flex items-start gap-2.5 max-w-[90%] min-w-0">
+            <div className="flex-shrink-0 w-7 h-7 rounded-lg bg-purple-500/10 flex items-center justify-center mt-0.5">
+              <RefreshCw size={14} className={`text-purple-400 ${isCompacting ? "animate-spin" : ""}`} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-purple-500/5 border border-purple-500/20">
+                {isCompacting ? (
+                  <>
+                    <Loader2 size={12} className="animate-spin text-purple-400 flex-shrink-0" />
+                    <span className="text-xs text-purple-400">{t("chat.compacting")}</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle size={12} className="text-purple-400 flex-shrink-0" />
+                    <span className="text-xs text-purple-400">
+                      {t("chat.compacted")}
+                      {preTokens > 0 && (
+                        <span className="text-text-muted ml-1.5">
+                          {Math.round(preTokens / 1000)}K tokens
+                        </span>
+                      )}
+                    </span>
+                  </>
+                )}
                 <span className="text-[10px] text-text-muted">{formatTimeWithSeconds(message.timestamp)}</span>
               </div>
             </div>

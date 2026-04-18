@@ -40,6 +40,9 @@ export interface StreamMessage {
   is_error?: boolean;
   total_cost_usd?: number;
   num_turns?: number;
+  // For system status events (compacting)
+  status?: "compacting" | null;
+  compact_metadata?: { trigger: "manual" | "auto"; pre_tokens: number };
   // For user type — enriched tool result info
   tool_use_result?: {
     stdout?: string;
@@ -128,6 +131,7 @@ export interface AskUserQuestion {
 export interface PendingInteraction {
   type: "ask_user" | "exit_plan";
   requestId: string;
+  sessionId: string;
   /** For ask_user: the questions array */
   questions?: AskUserQuestion[];
   /** For exit_plan: the tool input (allowedPrompts, etc.) */
@@ -135,3 +139,7 @@ export interface PendingInteraction {
   /** For exit_plan: the plan markdown content */
   planContent?: string;
 }
+
+export type AnsweredToolData =
+  | { type: "ask_user"; answers: { question: string; answer: string }[] }
+  | { type: "exit_plan"; planContent: string; rejected?: boolean };

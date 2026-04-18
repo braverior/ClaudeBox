@@ -36,6 +36,8 @@ const en: TranslationDict = {
   "input.addModelsHint": "Add models in Settings",
   "input.cliNotDetected": "Claude CLI not detected. Check Settings.",
   "input.tools": "Tools",
+  "input.skills": "Skills",
+  "skill.search": "Search skills...",
   "input.selectAll": "Select All",
   "input.deselectAll": "Deselect All",
   "input.attach": "Attach files",
@@ -54,6 +56,8 @@ const en: TranslationDict = {
   "chat.newSession.cancel": "Cancel",
   "chat.historyCleared": "Chat history cleared.",
   "chat.stoppedByUser": "Generation stopped by user",
+  "chat.compacting": "Compressing context...",
+  "chat.compacted": "Context compressed",
 
   // Permission modes
   "mode.default": "Default",
@@ -275,6 +279,8 @@ const zh: TranslationDict = {
   "input.addModelsHint": "请在设置中添加模型",
   "input.cliNotDetected": "未检测到 Claude CLI，请检查设置。",
   "input.tools": "工具",
+  "input.skills": "技能",
+  "skill.search": "搜索技能...",
   "input.selectAll": "全选",
   "input.deselectAll": "取消全选",
   "input.attach": "附加文件",
@@ -293,6 +299,8 @@ const zh: TranslationDict = {
   "chat.newSession.cancel": "取消",
   "chat.historyCleared": "历史聊天记录已清除。",
   "chat.stoppedByUser": "用户已停止生成",
+  "chat.compacting": "上下文压缩中...",
+  "chat.compacted": "上下文已压缩",
 
   // Permission modes
   "mode.default": "默认",
