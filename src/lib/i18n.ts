@@ -87,6 +87,24 @@ const en: TranslationDict = {
   "settings.done": "Done",
   "settings.copyCommand": "Copy command",
 
+  // Settings Tabs
+  "settings.tab.environment": "Environment",
+  "settings.tab.model": "Model",
+  "settings.tab.lark": "Lark Bot",
+  "settings.tab.tokens": "Token Stats",
+  "settings.tab.about": "About",
+
+  // About
+  "about.version": "Version",
+  "about.checkUpdate": "Check for Updates",
+  "about.checking": "Checking...",
+  "about.upToDate": "Up to date",
+  "about.newVersion": "v{version} available",
+  "about.downloading": "Downloading v{version}...",
+  "about.readyToInstall": "v{version} ready — restart to install",
+  "about.restart": "Restart Now",
+  "about.viewLogs": "View Logs",
+
   // Token Stats
   "tokenStats.title": "Token Usage",
   "tokenStats.allProjects": "All Projects",
@@ -307,6 +325,24 @@ const zh: TranslationDict = {
   "settings.tokenStats": "Token 统计",
   "settings.done": "完成",
   "settings.copyCommand": "复制命令",
+
+  // Settings Tabs
+  "settings.tab.environment": "环境检测",
+  "settings.tab.model": "模型配置",
+  "settings.tab.lark": "飞书机器人",
+  "settings.tab.tokens": "Token 统计",
+  "settings.tab.about": "关于",
+
+  // About
+  "about.version": "版本",
+  "about.checkUpdate": "检查更新",
+  "about.checking": "检查中...",
+  "about.upToDate": "已是最新版本",
+  "about.newVersion": "v{version} 可更新",
+  "about.downloading": "正在下载 v{version}...",
+  "about.readyToInstall": "v{version} 已就绪 — 重启安装",
+  "about.restart": "立即重启",
+  "about.viewLogs": "查看日志",
 
   // Token Stats
   "tokenStats.title": "Token 使用统计",

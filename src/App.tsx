@@ -387,7 +387,9 @@ export default function App() {
         onClose={() => setSettingsOpen(false)}
         onClaudeStatusChange={setClaudeAvailable}
         onOpenDebug={() => setDebugOpen(true)}
-        onOpenTokenStats={() => setTokenStatsOpen(true)}
+        updateStatus={updateStatus}
+        onRestart={applyUpdateAndRelaunch}
+        onCheckUpdate={() => checkAndDownloadUpdate(setUpdateStatus)}
       />
 
       <TokenStatsDialog open={tokenStatsOpen} onClose={() => setTokenStatsOpen(false)} />
