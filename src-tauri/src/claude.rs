@@ -609,6 +609,36 @@ pub struct SendMessageRequest {
 
 // ── Commands ─────────────────────────────────────────────────────────
 
+#[cfg(windows)]
+fn decode_os_output(bytes: &[u8]) -> String {
+    if let Ok(s) = String::from_utf8(bytes.to_vec()) {
+        return s;
+    }
+    // cmd.exe uses the OEM code page — decode via MultiByteToWideChar
+    extern "system" {
+        fn GetOEMCP() -> u32;
+        fn MultiByteToWideChar(
+            cp: u32, flags: u32, src: *const u8, src_len: i32,
+            dst: *mut u16, dst_len: i32,
+        ) -> i32;
+    }
+    unsafe {
+        let cp = GetOEMCP();
+        let len = MultiByteToWideChar(cp, 0, bytes.as_ptr(), bytes.len() as i32, std::ptr::null_mut(), 0);
+        if len <= 0 {
+            return String::from_utf8_lossy(bytes).into_owned();
+        }
+        let mut wide = vec![0u16; len as usize];
+        MultiByteToWideChar(cp, 0, bytes.as_ptr(), bytes.len() as i32, wide.as_mut_ptr(), len);
+        String::from_utf16_lossy(&wide)
+    }
+}
+
+#[cfg(not(windows))]
+fn decode_os_output(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
 /// Check whether the Claude CLI is reachable.
 /// Runs `claude --version` in a background thread with a 10-second timeout so
 /// that a slow PATH search on Windows can never freeze the UI at startup.
@@ -626,10 +656,18 @@ pub async fn check_claude_installed(claude_path: Option<String>) -> Result<Strin
         Ok(Ok(output)) if output.status.success() => {
             Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
         }
-        Ok(Ok(output)) => Err(format!(
-            "claude CLI error: {}",
-            String::from_utf8_lossy(&output.stderr)
-        )),
+        Ok(Ok(output)) => {
+            let stderr = decode_os_output(&output.stderr);
+            let stderr = stderr.trim();
+            if stderr.is_empty() {
+                Err(format!(
+                    "claude CLI exited with code {}",
+                    output.status.code().unwrap_or(-1)
+                ))
+            } else {
+                Err(format!("claude CLI error: {}", stderr))
+            }
+        }
         Ok(Err(e)) => Err(format!("claude CLI not found at '{}': {}", cmd_for_err, e)),
         Err(_) => Err(format!(
             "claude CLI check timed out (10s) — '{}' may not be installed or PATH is slow",
@@ -649,7 +687,7 @@ pub async fn check_node_version() -> Result<String, String> {
         Ok(Ok(output)) if output.status.success() => {
             Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
         }
-        Ok(Ok(output)) => Err(String::from_utf8_lossy(&output.stderr).trim().to_string()),
+        Ok(Ok(output)) => Err(decode_os_output(&output.stderr).trim().to_string()),
         Ok(Err(e)) => Err(format!("node not found: {}", e)),
         Err(_) => Err("node version check timed out".to_string()),
     }
@@ -1327,6 +1365,231 @@ pub fn read_image_base64(path: String) -> Result<String, String> {
     };
     let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
     Ok(format!("data:{};base64,{}", mime, b64))
+}
+
+// ── One-click install: Node.js + Claude Code ────────────────────────
+
+const NODE_LTS_VERSION: &str = "v22.16.0";
+
+#[derive(Clone, Serialize)]
+pub struct NodeInstallerInfo {
+    pub url: String,
+    pub filename: String,
+    pub version: String,
+}
+
+#[tauri::command]
+pub fn get_node_installer_url() -> Result<NodeInstallerInfo, String> {
+    let ver = NODE_LTS_VERSION;
+    let mirror = std::env::var("NODEJS_MIRROR")
+        .unwrap_or_else(|_| "https://nodejs.org/dist".to_string());
+    let base = mirror.trim_end_matches('/');
+
+    #[cfg(target_os = "macos")]
+    let filename = format!("node-{ver}.pkg");
+
+    #[cfg(target_os = "windows")]
+    let filename = {
+        let arch = if std::env::consts::ARCH == "aarch64" { "arm64" } else { "x64" };
+        format!("node-{ver}-{arch}.msi")
+    };
+
+    #[cfg(target_os = "linux")]
+    let filename = {
+        let arch = if std::env::consts::ARCH == "aarch64" { "linux-arm64" } else { "linux-x64" };
+        format!("node-{ver}-{arch}.tar.xz")
+    };
+
+    Ok(NodeInstallerInfo {
+        url: format!("{base}/{ver}/{filename}"),
+        filename,
+        version: ver.to_string(),
+    })
+}
+
+#[derive(Clone, Serialize)]
+struct InstallProgress {
+    step: String,
+    progress: f64,
+    message: String,
+    done: bool,
+    error: Option<String>,
+}
+
+fn emit_install(app: &AppHandle, step: &str, progress: f64, message: &str, done: bool, error: Option<String>) {
+    let _ = app.emit("install-progress", InstallProgress {
+        step: step.to_string(),
+        progress,
+        message: message.to_string(),
+        done,
+        error,
+    });
+}
+
+#[tauri::command]
+pub async fn download_and_open_node_installer(app: AppHandle) -> Result<(), String> {
+    let info = get_node_installer_url()?;
+    let dest_dir = std::env::temp_dir();
+    let dest_path = dest_dir.join(&info.filename);
+    let dest_str = dest_path.to_string_lossy().to_string();
+
+    emit_install(&app, "download_node", 0.0, &format!("Downloading {}", info.filename), false, None);
+
+    let app2 = app.clone();
+    let url = info.url.clone();
+    let dest = dest_str.clone();
+
+    let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+    std::thread::spawn(move || {
+        let result = (|| -> Result<(), String> {
+            // Get Content-Length first
+            let head_out = command_with_path("curl")
+                .args(["-sIL", &url])
+                .output();
+            let total_bytes: u64 = head_out.ok().and_then(|o| {
+                let s = String::from_utf8_lossy(&o.stdout);
+                s.lines()
+                    .filter_map(|line| {
+                        let lower = line.to_lowercase();
+                        if lower.starts_with("content-length:") {
+                            lower.split(':').nth(1)?.trim().parse::<u64>().ok()
+                        } else {
+                            None
+                        }
+                    })
+                    .last()
+            }).unwrap_or(0);
+
+            // Start curl download
+            let mut child = command_with_path("curl")
+                .args(["-sL", "-o", &dest, &url])
+                .spawn()
+                .map_err(|e| format!("Failed to start curl: {e}"))?;
+
+            // Poll file size for progress
+            let dest_p = std::path::PathBuf::from(&dest);
+            loop {
+                match child.try_wait() {
+                    Ok(Some(status)) => {
+                        if status.success() {
+                            return Ok(());
+                        } else {
+                            return Err(format!("curl exited with code {}", status.code().unwrap_or(-1)));
+                        }
+                    }
+                    Ok(None) => {
+                        if total_bytes > 0 {
+                            let downloaded = std::fs::metadata(&dest_p).map(|m| m.len()).unwrap_or(0);
+                            let pct = (downloaded as f64 / total_bytes as f64).min(0.99);
+                            emit_install(&app2, "download_node", pct,
+                                &format!("{:.1} MB / {:.1} MB", downloaded as f64 / 1_048_576.0, total_bytes as f64 / 1_048_576.0),
+                                false, None);
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(500));
+                    }
+                    Err(e) => return Err(format!("curl error: {e}")),
+                }
+            }
+        })();
+        let _ = tx.send(result);
+    });
+
+    // Wait with a generous timeout (10 minutes for large downloads)
+    match rx.recv_timeout(std::time::Duration::from_secs(600)) {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => {
+            emit_install(&app, "download_node", 0.0, &e, true, Some(e.clone()));
+            return Err(e);
+        }
+        Err(_) => {
+            let msg = "Download timed out (10 min)".to_string();
+            emit_install(&app, "download_node", 0.0, &msg, true, Some(msg.clone()));
+            return Err(msg);
+        }
+    }
+
+    emit_install(&app, "download_node", 1.0, "Download complete", false, None);
+
+    // Open the installer
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open").arg(&dest_str).spawn()
+            .map_err(|e| format!("Failed to open installer: {e}"))?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        Command::new("cmd")
+            .args(["/C", "start", "", &dest_str])
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .map_err(|e| format!("Failed to open installer: {e}"))?;
+    }
+
+    emit_install(&app, "open_installer", -1.0, "Installer opened", false, None);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn install_claude_code(app: AppHandle) -> Result<(), String> {
+    emit_install(&app, "install_claude", -1.0, "Installing Claude Code...", false, None);
+
+    let app2 = app.clone();
+    let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+    std::thread::spawn(move || {
+        let result = (|| -> Result<(), String> {
+            let mut child = command_with_path("npm")
+                .args(["install", "-g", "@anthropic-ai/claude-code"])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .map_err(|e| format!("Failed to start npm: {e}"))?;
+
+            let stderr = child.stderr.take();
+            let app3 = app2.clone();
+            let stderr_thread = std::thread::spawn(move || {
+                if let Some(stderr) = stderr {
+                    let reader = BufReader::new(stderr);
+                    for line in reader.lines().flatten() {
+                        emit_install(&app3, "install_claude", -1.0, &line, false, None);
+                    }
+                }
+            });
+
+            if let Some(stdout) = child.stdout.take() {
+                let reader = BufReader::new(stdout);
+                for line in reader.lines().flatten() {
+                    emit_install(&app2, "install_claude", -1.0, &line, false, None);
+                }
+            }
+
+            let _ = stderr_thread.join();
+            let status = child.wait().map_err(|e| format!("npm error: {e}"))?;
+            if status.success() {
+                Ok(())
+            } else {
+                Err(format!("npm install exited with code {}", status.code().unwrap_or(-1)))
+            }
+        })();
+        let _ = tx.send(result);
+    });
+
+    match rx.recv_timeout(std::time::Duration::from_secs(300)) {
+        Ok(Ok(())) => {
+            emit_install(&app, "install_claude", 1.0, "Claude Code installed successfully", true, None);
+            Ok(())
+        }
+        Ok(Err(e)) => {
+            emit_install(&app, "install_claude", 0.0, &e, true, Some(e.clone()));
+            Err(e)
+        }
+        Err(_) => {
+            let msg = "npm install timed out (5 min)".to_string();
+            emit_install(&app, "install_claude", 0.0, &msg, true, Some(msg.clone()));
+            Err(msg)
+        }
+    }
 }
 
 // ── Clipboard image saving ───────────────────────────────────────────

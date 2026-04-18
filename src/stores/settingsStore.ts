@@ -23,6 +23,11 @@ interface SettingsState {
 const STORAGE_KEY = "settings";
 const LS_STORAGE_KEY = "claudebox-settings";
 
+function getSystemLocale(): "en" | "zh" {
+  const lang = navigator.language || (navigator as any).userLanguage || "en";
+  return lang.startsWith("zh") ? "zh" : "en";
+}
+
 const defaultSettings: Settings = {
   model: "",
   models: [],
@@ -30,7 +35,7 @@ const defaultSettings: Settings = {
   claudePath: "claude",
   workingDirectory: "",
   theme: "dark",
-  locale: "en",
+  locale: getSystemLocale(),
   apiKey: "",
   baseUrl: "",
 };

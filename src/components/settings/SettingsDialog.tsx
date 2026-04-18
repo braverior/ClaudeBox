@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
-import { X, CheckCircle, XCircle, Loader2, ScrollText, Plus, Trash2, Copy, Check, BarChart2, Bot } from "lucide-react";
+import { X, CheckCircle, XCircle, Loader2, ScrollText, Plus, Trash2, BarChart2, Bot } from "lucide-react";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useLarkStore, type LarkStatus } from "../../stores/larkStore";
 import { checkClaudeInstalled, checkModelAvailable, checkNodeVersion } from "../../lib/claude-ipc";
 import { startLarkBot, stopLarkBot } from "../../lib/lark-ipc";
 import { useT } from "../../lib/i18n";
+import InstallWizard from "./InstallWizard";
 
 function LarkStatusDot({ status }: { status: LarkStatus }) {
   if (status === "connected") return <span className="inline-block w-2 h-2 rounded-full bg-success" />;
@@ -42,35 +43,6 @@ interface SettingsDialogProps {
   onClaudeStatusChange: (available: boolean) => void;
   onOpenDebug?: () => void;
   onOpenTokenStats?: () => void;
-}
-
-function InstallInstructions() {
-  const [copied, setCopied] = useState(false);
-  const t = useT();
-  const info = getInstallInstructions();
-  const handleCopy = () => {
-    navigator.clipboard.writeText(info.command);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-  return (
-    <div className="mt-2 rounded-lg bg-bg-secondary border border-border p-3">
-      <p className="text-xs text-text-secondary mb-2">
-        {t("settings.installFor")} <span className="font-medium text-text-primary">{info.platform}</span>:
-      </p>
-      <div className="flex items-center gap-2 bg-code-bg rounded-md px-3 py-2">
-        <code className="text-xs text-text-primary flex-1 select-all">{info.command}</code>
-        <button
-          onClick={handleCopy}
-          className="p-1 rounded text-text-muted hover:text-text-primary transition-colors flex-shrink-0"
-          title={t("settings.copyCommand")}
-        >
-          {copied ? <Check size={12} className="text-success" /> : <Copy size={12} />}
-        </button>
-      </div>
-      <p className="text-[10px] text-text-muted mt-1.5">{info.note}</p>
-    </div>
-  );
 }
 
 function LarkSettingsSection() {
@@ -344,8 +316,13 @@ export default function SettingsDialog({
                 {t("settings.recheck")}
               </button>
             </div>
-            {/* Install instructions when not found */}
-            {!checking && !claudeVersion && <InstallInstructions />}
+            {/* Install wizard when not found */}
+            {!checking && !claudeVersion && (
+              <InstallWizard
+                onComplete={checkClaude}
+                manualInstructions={getInstallInstructions()}
+              />
+            )}
             {/* Node.js version warning */}
             {!checking && nodeWarning && (
               <div className="mt-2 rounded-lg bg-warning/10 border border-warning/30 px-3 py-2 flex items-start gap-2">

@@ -85,6 +85,42 @@ export async function checkNodeVersion(): Promise<string> {
   return invoke("check_node_version");
 }
 
+// ── One-click install ──────────────────────────────────────────────
+
+export interface NodeInstallerInfo {
+  url: string;
+  filename: string;
+  version: string;
+}
+
+export interface InstallProgress {
+  step: string;
+  progress: number;
+  message: string;
+  done: boolean;
+  error: string | null;
+}
+
+export async function getNodeInstallerUrl(): Promise<NodeInstallerInfo> {
+  return invoke("get_node_installer_url");
+}
+
+export async function downloadAndOpenNodeInstaller(): Promise<void> {
+  return invoke("download_and_open_node_installer");
+}
+
+export async function installClaudeCode(): Promise<void> {
+  return invoke("install_claude_code");
+}
+
+export function onInstallProgress(
+  callback: (payload: InstallProgress) => void
+): Promise<UnlistenFn> {
+  return listen<InstallProgress>("install-progress", (event) => {
+    callback(event.payload);
+  });
+}
+
 /** Check if a model is available by making a minimal API call */
 export async function checkModelAvailable(
   model: string,

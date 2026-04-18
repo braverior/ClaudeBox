@@ -43,7 +43,7 @@ const en: TranslationDict = {
   "chat.launching": "Claude is starting...",
   "chat.launched": "Claude started",
   "chat.resumeFrom": "Session resumed",
-  "chat.clearSession": "New session",
+  "chat.clearSession": "New",
   "chat.clearSessionConfirm": "Clear session memory? The next message will start a fresh conversation without previous context.",
   "chat.sessionCleared": "Session memory cleared. Next message will start fresh.",
   "chat.newSession.title": "Start New Session",
@@ -195,6 +195,27 @@ const en: TranslationDict = {
   "lark.autoConnect": "Auto-connect on startup",
   "lark.missingCredentials": "Please enter App ID and App Secret.",
   "lark.hint": "Connect a Lark bot to remotely control Claude Code from your phone or any Lark client — send coding tasks, review results, and manage projects on the go via WebSocket (no public URL needed).",
+
+  // Install Wizard
+  "install.title": "One-click Install",
+  "install.desc": "Install Node.js and Claude Code automatically.",
+  "install.button": "Install Now",
+  "install.manualSetup": "Manual Setup",
+  "install.checking": "Checking system...",
+  "install.downloadingNode": "Downloading Node.js {version}...",
+  "install.waitingInstaller": "Please complete the Node.js installer",
+  "install.waitingInstallerDesc": "The Node.js installer has been opened. Follow the on-screen instructions to complete the installation.",
+  "install.waitingDetect": "Waiting for Node.js to be detected...",
+  "install.continue": "Continue",
+  "install.checkingNode": "Verifying Node.js installation...",
+  "install.nodeNotFound": "Node.js not detected yet. Please finish the installer and click Retry.",
+  "install.retry": "Retry",
+  "install.installingClaude": "Installing Claude Code...",
+  "install.checkingClaude": "Verifying Claude Code...",
+  "install.success": "Claude Code installed successfully!",
+  "install.failed": "Installation failed: {error}",
+  "install.nodeOld": "Node.js {version} is too old, need to install Node.js {target}.",
+  "install.openUrl": "Download from website",
 };
 
 const zh: TranslationDict = {
@@ -390,6 +411,27 @@ const zh: TranslationDict = {
   "lark.autoConnect": "启动时自动连接",
   "lark.missingCredentials": "请输入 App ID 和 App Secret。",
   "lark.hint": "配置飞书机器人后，可通过手机或任意飞书客户端远程操控 Claude Code —— 发送编码任务、查看执行结果、管理项目，随时随地 Remote Coding。使用 WebSocket 长连接，无需公网地址。",
+
+  // Install Wizard
+  "install.title": "一键安装",
+  "install.desc": "自动安装 Node.js 和 Claude Code。",
+  "install.button": "立即安装",
+  "install.manualSetup": "手动安装",
+  "install.checking": "正在检查系统...",
+  "install.downloadingNode": "正在下载 Node.js {version}...",
+  "install.waitingInstaller": "请完成 Node.js 安装",
+  "install.waitingInstallerDesc": "Node.js 安装程序已打开，请按照屏幕上的指引完成安装。",
+  "install.waitingDetect": "等待检测 Node.js...",
+  "install.continue": "继续",
+  "install.checkingNode": "正在验证 Node.js...",
+  "install.nodeNotFound": "尚未检测到 Node.js，请完成安装后点击重试。",
+  "install.retry": "重试",
+  "install.installingClaude": "正在安装 Claude Code...",
+  "install.checkingClaude": "正在验证 Claude Code...",
+  "install.success": "Claude Code 安装成功！",
+  "install.failed": "安装失败：{error}",
+  "install.nodeOld": "Node.js {version} 版本过低，需要安装 Node.js {target}。",
+  "install.openUrl": "前往官网下载",
 };
 
 const dictionaries: Record<string, TranslationDict> = { en, zh };

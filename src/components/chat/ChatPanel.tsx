@@ -540,10 +540,6 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
     return () => { unlisten.then((fn) => fn()); };
   }, [handleStreamData, handleStreamDone, markAllCompleted]);
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, currentSessionId]);
-
   const handleSend = useCallback(
     async (content: string, attachments?: Attachment[]) => {
       if (!currentSessionId || !currentSession) return;
@@ -682,6 +678,10 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
   const currentMessages = currentSessionId
     ? messages[currentSessionId] || []
     : [];
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [currentMessages, currentSessionId]);
 
   // 分轮分页：计算起始索引
   const msgStartIndex = useMemo(
