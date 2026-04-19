@@ -89,6 +89,8 @@ interface InputAreaProps {
   onClearSession?: () => void;
   /** Current context token count for progress bar */
   contextTokens?: number;
+  /** Actual context window size from SDK (e.g. 200000 or 1000000) */
+  contextWindow?: number;
 }
 
 const ALL_TOOLS = [
@@ -386,6 +388,9 @@ function BranchDropdown({
       {open && !pendingBranch && (
         <div className="absolute bottom-full left-0 mb-1 min-w-[160px] max-w-[260px] max-h-[240px]
                         overflow-y-auto rounded-lg bg-bg-secondary border border-border shadow-xl z-50 py-1">
+          <div className="px-3 py-1.5 text-[10px] text-text-muted font-medium uppercase tracking-wider border-b border-border">
+            {t("branch.localBranches")}
+          </div>
           {error && (
             <p className="px-3 py-1.5 text-[10px] text-error border-b border-border">{error}</p>
           )}
@@ -592,16 +597,18 @@ function AttachmentChip({
   );
 }
 
-const CONTEXT_WINDOW = 200_000;
+const DEFAULT_CONTEXT_WINDOW = 200_000;
 
 function formatTokenCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
   return String(n);
 }
 
-function ContextProgressBar({ tokens }: { tokens?: number }) {
+function ContextProgressBar({ tokens, contextWindow, label }: { tokens?: number; contextWindow?: number; label: string }) {
   if (!tokens) return null;
-  const ratio = Math.min(1, tokens / CONTEXT_WINDOW);
+  const windowSize = contextWindow || DEFAULT_CONTEXT_WINDOW;
+  const ratio = Math.min(1, tokens / windowSize);
   const pct = Math.round(ratio * 100);
   const fillColor =
     ratio > 0.8
@@ -615,20 +622,20 @@ function ContextProgressBar({ tokens }: { tokens?: number }) {
       : ratio > 0.6
         ? "text-warning"
         : "text-success";
-  const tooltip = `${formatTokenCount(tokens)} / ${formatTokenCount(CONTEXT_WINDOW)} tokens (${pct}%)`;
+  const tooltip = `${label}: ${formatTokenCount(tokens)} / ${formatTokenCount(windowSize)} tokens (${pct}%)`;
 
   return (
     <div
       className="flex items-center gap-1.5 flex-shrink-0 cursor-default"
       title={tooltip}
     >
-      <div className="relative w-12 h-2 rounded-sm bg-text-muted/15 overflow-hidden">
+      <div className="relative w-12 h-2 rounded-sm bg-text-muted/15 overflow-hidden pointer-events-none">
         <div
           className={`absolute top-0 left-0 h-full ${fillColor} transition-all duration-500`}
           style={{ width: `${pct}%` }}
         />
       </div>
-      <span className={`text-[10px] tabular-nums leading-none font-medium ${pctColor}`}>{pct}%</span>
+      <span className={`text-[10px] tabular-nums leading-none font-medium pointer-events-none ${pctColor}`}>{pct}%</span>
     </div>
   );
 }
@@ -649,6 +656,7 @@ export default function InputArea({
   onAllowedToolsChange,
   onClearSession,
   contextTokens,
+  contextWindow,
 }: InputAreaProps) {
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -873,7 +881,7 @@ export default function InputArea({
                       <Eraser size={12} className="flex-shrink-0" />
                       <span>{t("chat.clearSession")}</span>
                     </button>
-                    <ContextProgressBar tokens={contextTokens} />
+                    <ContextProgressBar tokens={contextTokens} contextWindow={contextWindow} label={t("input.contextWindow")} />
                     <span className="text-border/40 flex-shrink-0">|</span>
                   </>
                 )}

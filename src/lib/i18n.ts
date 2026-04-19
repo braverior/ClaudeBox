@@ -31,11 +31,12 @@ const en: TranslationDict = {
   "input.placeholder": "Send a message...",
   "input.stop": "Stop generation",
   "input.send": "Send message",
-  "input.model": "Model:",
+  "input.model": "Switch model",
   "input.mode": "Mode:",
   "input.addModelsHint": "Add models in Settings",
   "input.cliNotDetected": "Claude CLI not detected. Check Settings.",
   "input.tools": "Tools",
+  "input.contextWindow": "Context window",
   "input.skills": "Skills",
   "skill.search": "Search skills...",
   "input.selectAll": "Select All",
@@ -199,6 +200,7 @@ const en: TranslationDict = {
 
   // Branch
   "branch.switch": "Switch branch",
+  "branch.localBranches": "Local branches",
   "branch.switchFailed": "Failed to switch branch",
   "branch.dirtyWorktree": "Please commit or stash changes before switching branch",
   "branch.stopFirst": "A task is running. Stop it before switching branch?",
@@ -277,11 +279,12 @@ const zh: TranslationDict = {
   "input.placeholder": "输入消息...",
   "input.stop": "停止生成",
   "input.send": "发送消息",
-  "input.model": "模型：",
+  "input.model": "切换模型",
   "input.mode": "模式：",
   "input.addModelsHint": "请在设置中添加模型",
   "input.cliNotDetected": "未检测到 Claude CLI，请检查设置。",
   "input.tools": "工具",
+  "input.contextWindow": "上下文窗口",
   "input.skills": "技能",
   "skill.search": "搜索技能...",
   "input.selectAll": "全选",
@@ -445,6 +448,7 @@ const zh: TranslationDict = {
 
   // Branch
   "branch.switch": "切换分支",
+  "branch.localBranches": "本地分支",
   "branch.switchFailed": "切换分支失败",
   "branch.dirtyWorktree": "请先提交或暂存更改后再切换分支",
   "branch.stopFirst": "任务正在运行中，是否停止后切换分支？",

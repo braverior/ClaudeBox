@@ -766,6 +766,17 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
     return tokens;
   })();
 
+  // Extract contextWindow from the latest assistant message with usage data
+  const sdkContextWindow = (() => {
+    for (let i = currentMessages.length - 1; i >= 0; i--) {
+      const m = currentMessages[i];
+      if (m.role === "assistant" && m.usage?.contextWindow) {
+        return m.usage.contextWindow;
+      }
+    }
+    return undefined;
+  })();
+
   // Compute duration from stream start
   const streamStartTime = currentSessionId ? streamStartTimes[currentSessionId] : undefined;
 
@@ -995,6 +1006,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
             hasClaudeSession={!!currentSession?.claudeSessionId}
             onClearSession={handleClearSession}
             contextTokens={contextTokens ?? undefined}
+            contextWindow={sdkContextWindow}
           />
         </div>
 

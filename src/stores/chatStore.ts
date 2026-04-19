@@ -32,7 +32,7 @@ export interface Session {
   claudeSessionId?: string;
 }
 
-export const DEFAULT_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep", "Bash"];
+export const DEFAULT_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "WebFetch", "WebSearch", "NotebookEdit", "Agent"];
 
 interface ChatState {
   sessions: Session[];
@@ -506,6 +506,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                   output_tokens: event.message.usage.output_tokens,
                   cache_creation_input_tokens: event.message.usage.cache_creation_input_tokens,
                   cache_read_input_tokens: event.message.usage.cache_read_input_tokens,
+                  server_tool_use_input_tokens: event.message.usage.server_tool_use_input_tokens,
+                  contextWindow: event.message.usage.contextWindow,
                 }
               : existing.usage,
           };
@@ -524,6 +526,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                   output_tokens: event.message.usage.output_tokens,
                   cache_creation_input_tokens: event.message.usage.cache_creation_input_tokens,
                   cache_read_input_tokens: event.message.usage.cache_read_input_tokens,
+                  server_tool_use_input_tokens: event.message.usage.server_tool_use_input_tokens,
+                  contextWindow: event.message.usage.contextWindow,
                 }
               : undefined,
           });

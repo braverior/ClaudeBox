@@ -6,21 +6,36 @@ on:
       - 'v*'
 
 # ─────────────────────────────────────────────────────────────────────
-# Secrets (all optional — omit Apple secrets to skip signing):
+# Required GitHub Secrets
+# ─────────────────────────────────────────────────────────────────────
 #
-#   TAURI_SIGNING_PRIVATE_KEY / _PASSWORD   Tauri updater signing
-#   APPLE_CERTIFICATE                       Base64 .p12 (Developer ID Application)
-#   APPLE_CERTIFICATE_PASSWORD              Password for the .p12
-#   APPLE_SIGNING_IDENTITY                  e.g. "Developer ID Application: ..."
-#   APPLE_ID / APPLE_ID_PASSWORD            Notarization credentials
-#   APPLE_TEAM_ID                           10-char Team ID
-#   KEYCHAIN_PASSWORD                       Arbitrary CI keychain password
-#   HOMEBREW_TAP_TOKEN                      PAT with repo scope for homebrew-tap
+# Tauri updater (required for auto-update signatures):
+#   TAURI_SIGNING_PRIVATE_KEY            Private minisign key
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD   Password for the minisign key
+#
+# Apple code signing (required for notarized macOS builds):
+#   APPLE_CERTIFICATE            Base64-encoded .p12 (Developer ID Application)
+#                                Export: security export -k ~/Library/Keychains/login.keychain-db \
+#                                        -t identities -f pkcs12 -P 'pwd' -o cert.p12
+#                                Then: base64 -i cert.p12 | pbcopy
+#   APPLE_CERTIFICATE_PASSWORD   Password set when exporting the .p12
+#   APPLE_SIGNING_IDENTITY       e.g. "Developer ID Application: Your Name (TEAMID)"
+#                                List: security find-identity -v -p codesigning
+#   KEYCHAIN_PASSWORD            Arbitrary password for the ephemeral CI keychain
+#
+# Apple notarization (required — unsigned/unnotarized apps show "damaged"):
+#   APPLE_ID                     Apple ID email address
+#   APPLE_PASSWORD               App-specific password (NOT your Apple ID password)
+#                                Create at https://appleid.apple.com → App-Specific Passwords
+#   APPLE_TEAM_ID                10-character Team ID from developer.apple.com
+#
+# Homebrew tap update:
+#   HOMEBREW_TAP_TOKEN           PAT (repo scope) for braverior/homebrew-tap
 # ─────────────────────────────────────────────────────────────────────
 
 jobs:
   # ═══════════════════════════════════════════════════════════════════
-  # Build (+ optional Sign) per platform
+  # Build (+ Sign + Notarize on macOS) per platform
   # ═══════════════════════════════════════════════════════════════════
   release:
     permissions:
@@ -70,7 +85,9 @@ jobs:
           npm run build:sidecar
           npm run build:lark-sidecar
 
-      # ── macOS: Import certificate (skipped if secret not set) ──
+      # ── macOS: Import Developer ID certificate into an ephemeral keychain ──
+      # Skipped if APPLE_CERTIFICATE secret is not configured → produces
+      # an UNSIGNED build, which macOS will flag as "damaged".
       - name: Import Apple signing certificate
         if: runner.os == 'macOS' && env.APPLE_CERTIFICATE != ''
         env:
@@ -78,24 +95,53 @@ jobs:
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
-          echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
-          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
-          security import certificate.p12 -k build.keychain \
-            -P "$APPLE_CERTIFICATE_PASSWORD" \
-            -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple:,codesign: \
-            -s -k "$KEYCHAIN_PASSWORD" build.keychain
-          rm certificate.p12
+          set -euo pipefail
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          CERT_PATH="$RUNNER_TEMP/certificate.p12"
 
-      # ── Build and upload to GitHub Release ──
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$CERT_PATH"
+
+          # Create an ephemeral keychain (isolated, never persists)
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Import cert granting access to codesign and security tools
+          security import "$CERT_PATH" -k "$KEYCHAIN_PATH" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security \
+            -T /usr/bin/productbuild
+
+          # Allow codesign to access the key without UI prompt
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Prepend to keychain search list so signing tools find it
+          security list-keychain -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+
+          # Diagnostics — verify the identity was imported
+          echo "Available signing identities:"
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+
+          rm -f "$CERT_PATH"
+
+      # ── Build, sign, notarize, and upload to GitHub Release ──
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Tauri updater signing
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Apple code signing — consumed by tauri CLI bundler on macOS
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          # Apple notarization — tauri-action runs `xcrun notarytool submit` after bundling
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'ClaudeBox ${{ github.ref_name }}'
@@ -103,6 +149,15 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+      # ── Cleanup: remove ephemeral keychain (even on build failure) ──
+      - name: Cleanup keychain
+        if: always() && runner.os == 'macOS'
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          if [ -f "$KEYCHAIN_PATH" ]; then
+            security delete-keychain "$KEYCHAIN_PATH" || true
+          fi
 
   # ═══════════════════════════════════════════════════════════════════
   # Update Homebrew Cask (after all builds finish)
@@ -189,6 +244,9 @@ jobs:
             name "ClaudeBox"
             desc "Native desktop GUI for Claude Code"
             homepage "https://github.com/braverior/ClaudeBox"
+
+            # The app ships its own Tauri updater, so Homebrew should not manage updates.
+            auto_updates true
 
             livecheck do
               url :url

@@ -30,6 +30,8 @@ export interface StreamMessage {
       output_tokens: number;
       cache_creation_input_tokens?: number;
       cache_read_input_tokens?: number;
+      server_tool_use_input_tokens?: number;
+      contextWindow?: number;
     };
   };
   // For result type
@@ -87,6 +89,8 @@ export interface ChatMessage {
     output_tokens: number;
     cache_creation_input_tokens?: number;
     cache_read_input_tokens?: number;
+    server_tool_use_input_tokens?: number;
+    contextWindow?: number;
   };
   isStreaming?: boolean;
   /** Track the original stream message id so we can append content blocks for the same turn */
