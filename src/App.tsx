@@ -5,12 +5,17 @@ import SettingsDialog from "./components/settings/SettingsDialog";
 import TokenStatsDialog from "./components/settings/TokenStatsDialog";
 import DebugPanel from "./components/debug/DebugPanel";
 import UpdateToast from "./components/UpdateToast";
+import ReleaseNotesDialog, { type ReleaseNotesMode } from "./components/ReleaseNotesDialog";
+import ChangelogDialog from "./components/ChangelogDialog";
 import { checkClaudeInstalled, applySystemProxy, emitDebug, sendMessage, onStream } from "./lib/claude-ipc";
 import {
   checkAndDownloadUpdate,
   applyUpdateAndRelaunch,
+  readPendingReleaseNotes,
+  clearPendingReleaseNotes,
   type UpdateStatus,
 } from "./lib/updater";
+import { getVersion } from "@tauri-apps/api/app";
 import { useSettingsStore } from "./stores/settingsStore";
 import { useChatStore } from "./stores/chatStore";
 import { useTokenUsageStore } from "./stores/tokenUsageStore";
@@ -62,6 +67,15 @@ export default function App() {
   const [claudeAvailable, setClaudeAvailable] = useState(true);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [updateDismissed, setUpdateDismissed] = useState(false);
+  const [releaseNotes, setReleaseNotes] = useState<{
+    open: boolean;
+    mode: ReleaseNotesMode;
+    version: string;
+    body?: string;
+    date?: string;
+  }>({ open: false, mode: "available", version: "" });
+  const [changelogOpen, setChangelogOpen] = useState(false);
+  const [appVersion, setAppVersion] = useState("");
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
   const { settings, loaded: settingsLoaded, init: initSettings } = useSettingsStore();
   const { loaded: chatLoaded, init: initChat } = useChatStore();
@@ -77,6 +91,7 @@ export default function App() {
     Promise.all([initSettings(), initChat(), initTokenUsage(), initLark()])
       .catch(console.error)
       .finally(() => clearTimeout(timer));
+    getVersion().then(setAppVersion).catch(() => {});
     return () => clearTimeout(timer);
   }, []);
 
@@ -143,6 +158,27 @@ export default function App() {
     refreshProxy().finally(() => {
       checkAndDownloadUpdate(setUpdateStatus);
     });
+    // Check if the user just updated — show release notes once
+    (async () => {
+      try {
+        const pending = await readPendingReleaseNotes();
+        if (!pending) return;
+        const current = await getVersion();
+        if (pending.version === current) {
+          setReleaseNotes({
+            open: true,
+            mode: "installed",
+            version: pending.version,
+            body: pending.body,
+            date: pending.date,
+          });
+        }
+        // Either matched (shown) or stale → clear
+        await clearPendingReleaseNotes();
+      } catch (err) {
+        emitDebug("warn", `[updater] Failed to check pending release notes: ${err}`);
+      }
+    })();
     // Poll every 30s to pick up proxy changes (e.g. Clash on/off)
     const id = setInterval(refreshProxy, 30_000);
     return () => clearInterval(id);
@@ -391,6 +427,18 @@ export default function App() {
     });
   }, [settingsLoaded, larkLoaded]);
 
+  // ── Release notes: open available-mode dialog from Settings / Toast ──
+  const showAvailableReleaseNotes = useCallback(() => {
+    if (!updateStatus?.version) return;
+    setReleaseNotes({
+      open: true,
+      mode: "available",
+      version: updateStatus.version,
+      body: updateStatus.body,
+      date: updateStatus.date,
+    });
+  }, [updateStatus]);
+
   // Show loading screen until stores are ready (or timeout fires)
   if (!forceReady && (!settingsLoaded || !chatLoaded)) {
     return (
@@ -409,6 +457,7 @@ export default function App() {
         updateStatus={updateStatus}
         onRestart={applyUpdateAndRelaunch}
         onCheckUpdate={() => checkAndDownloadUpdate(setUpdateStatus)}
+        onShowChangelog={() => setChangelogOpen(true)}
       />
       <ChatPanel claudeAvailable={claudeAvailable} />
 
@@ -423,9 +472,26 @@ export default function App() {
         updateStatus={updateStatus}
         onRestart={applyUpdateAndRelaunch}
         onCheckUpdate={() => checkAndDownloadUpdate(setUpdateStatus)}
+        onShowReleaseNotes={showAvailableReleaseNotes}
+        onShowChangelog={() => setChangelogOpen(true)}
       />
 
       <TokenStatsDialog open={tokenStatsOpen} onClose={() => setTokenStatsOpen(false)} />
+
+      <ReleaseNotesDialog
+        open={releaseNotes.open}
+        mode={releaseNotes.mode}
+        version={releaseNotes.version}
+        body={releaseNotes.body}
+        date={releaseNotes.date}
+        onClose={() => setReleaseNotes((r) => ({ ...r, open: false }))}
+      />
+
+      <ChangelogDialog
+        open={changelogOpen}
+        currentVersion={appVersion}
+        onClose={() => setChangelogOpen(false)}
+      />
 
       {/* Close confirm dialog */}
       {closeConfirmOpen && (
@@ -468,6 +534,7 @@ export default function App() {
             downloading={updateStatus.downloading}
             onRestart={applyUpdateAndRelaunch}
             onDismiss={() => setUpdateDismissed(true)}
+            onShowNotes={showAvailableReleaseNotes}
           />
         )}
     </div>

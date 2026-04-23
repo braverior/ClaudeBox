@@ -1,14 +1,16 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   X, CheckCircle, XCircle, Loader2, Plus, Trash2, Bot,
-  Monitor, Cpu, BarChart2, Info, ScrollText, RefreshCw, Star, ChevronDown, ExternalLink,
+  Monitor, Cpu, BarChart2, Info, ScrollText, RefreshCw, Star, ChevronDown, ExternalLink, FileText, AlertTriangle, History, Eye, EyeOff, Zap, ChevronRight,
 } from "lucide-react";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useLarkStore, type LarkStatus } from "../../stores/larkStore";
-import { checkClaudeInstalled, checkModelAvailable, checkNodeVersion } from "../../lib/claude-ipc";
+import { checkClaudeInstalled, checkNodeVersion, checkModelAvailable } from "../../lib/claude-ipc";
 import { startLarkBot, stopLarkBot } from "../../lib/lark-ipc";
 import { useT } from "../../lib/i18n";
+import { getProvider, resolveModelCreds, type ModelConfig } from "../../lib/providers";
+import AddModelDialog from "./AddModelDialog";
 import { NodeStatusSection, ClaudeInstallButton } from "./InstallWizard";
 import { TokenStatsContent } from "./TokenStatsDialog";
 import type { UpdateStatus } from "../../lib/updater";
@@ -176,146 +178,182 @@ function EnvironmentSection({
 
 // ── Model Tab ─────────────────────────────────────────────────────────
 
+function ProviderBadge({ providerId }: { providerId: string }) {
+  const t = useT();
+  const provider = getProvider(providerId);
+  return (
+    <span className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium bg-accent/10 text-accent border border-accent/20">
+      {t(`provider.${provider.id}`)}
+    </span>
+  );
+}
+
 function ModelSection() {
   const t = useT();
   const { settings, updateSettings } = useSettingsStore();
-  const [modelInput, setModelInput] = useState("");
-  const [modelChecking, setModelChecking] = useState(false);
-  const [modelError, setModelError] = useState<string | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [testResults, setTestResults] = useState<Record<string, { status: "testing" | "ok" | "error"; error?: string }>>({});
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [revealed, setRevealed] = useState<Record<string, boolean>>({});
 
-  const addModel = async () => {
-    const trimmed = modelInput.trim();
-    if (!trimmed || settings.models.includes(trimmed)) return;
+  const handleAdd = (config: ModelConfig) => {
+    if (settings.models.some((m) => m.id === config.id)) return;
+    const newModels = [...settings.models, config];
+    updateSettings({ models: newModels, model: config.id });
+  };
 
-    setModelError(null);
-    setModelChecking(true);
+  const handleTest = async (m: ModelConfig) => {
+    setTestResults((prev) => ({ ...prev, [m.id]: { status: "testing" } }));
+    const { apiKey, baseUrl } = resolveModelCreds(m.id, settings.models, settings.apiKey, settings.baseUrl);
     try {
-      await checkModelAvailable(
-        trimmed,
-        settings.apiKey || undefined,
-        settings.baseUrl || undefined,
-      );
-      const newModels = [...settings.models, trimmed];
-      updateSettings({ models: newModels, model: trimmed });
-      setModelInput("");
+      await checkModelAvailable(m.id, apiKey || undefined, baseUrl || undefined);
+      setTestResults((prev) => ({ ...prev, [m.id]: { status: "ok" } }));
     } catch (err) {
-      const reason = String(err);
-      if (reason.includes("no_api_key")) {
-        const newModels = [...settings.models, trimmed];
-        updateSettings({ models: newModels, model: trimmed });
-        setModelInput("");
-        setModelError(t("settings.modelNoApiKey"));
-      } else {
-        setModelError(t("settings.modelUnavailable", { reason }));
-      }
-    } finally {
-      setModelChecking(false);
+      setTestResults((prev) => ({ ...prev, [m.id]: { status: "error", error: String(err) } }));
     }
+  };
+
+  const maskKey = (key: string) => {
+    if (!key) return "—";
+    if (key.length <= 8) return "••••••••";
+    return `${key.slice(0, 4)}${"•".repeat(Math.max(4, key.length - 8))}${key.slice(-4)}`;
   };
 
   return (
     <div className="space-y-5">
       {/* Models */}
       <div>
-        <label className="text-sm font-medium text-text-primary block mb-1.5">
-          {t("settings.models")}
-        </label>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={modelInput}
-            onChange={(e) => {
-              setModelInput(e.target.value);
-              setModelError(null);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                addModel();
-              }
-            }}
-            placeholder="e.g. claude-sonnet-4-20250514"
-            disabled={modelChecking}
-            className="flex-1 rounded-lg bg-input-bg border border-border px-3 py-2 text-sm
-                       text-text-primary placeholder:text-text-muted
-                       focus:outline-none focus:ring-2 focus:ring-accent/50
-                       disabled:opacity-50"
-          />
+        <div className="flex items-center justify-between mb-2">
+          <label className="text-sm font-medium text-text-primary">
+            {t("settings.models")}
+          </label>
           <button
-            onClick={addModel}
-            disabled={!modelInput.trim() || settings.models.includes(modelInput.trim()) || modelChecking}
-            className="px-3 py-2 rounded-lg bg-accent text-white hover:bg-accent-hover
-                       transition-colors text-sm disabled:opacity-30 disabled:cursor-not-allowed
-                       flex items-center gap-1"
+            onClick={() => setAddOpen(true)}
+            className="px-2.5 py-1 rounded-lg bg-accent text-white hover:bg-accent-hover
+                       transition-colors text-xs font-medium flex items-center gap-1"
           >
-            {modelChecking ? (
-              <Loader2 size={14} className="animate-spin" />
-            ) : (
-              <Plus size={14} />
-            )}
-            {t("settings.add")}
+            <Plus size={12} />
+            {t("settings.addModel")}
           </button>
         </div>
-        {modelChecking && (
-          <p className="text-xs text-text-muted mt-1 flex items-center gap-1">
-            <Loader2 size={10} className="animate-spin" />
-            {t("settings.modelChecking")}
+        {settings.models.length > 0 ? (
+          <div className="space-y-1">
+            {settings.models.map((m) => {
+              const isExpanded = !!expanded[m.id];
+              const isRevealed = !!revealed[m.id];
+              const result = testResults[m.id];
+              const { apiKey, baseUrl } = resolveModelCreds(m.id, settings.models, settings.apiKey, settings.baseUrl);
+              return (
+                <div key={m.id} className="rounded-lg bg-bg-secondary overflow-hidden">
+                  <div className="flex items-center justify-between gap-2 px-3 py-1.5 text-sm group">
+                    <button
+                      onClick={() => setExpanded((p) => ({ ...p, [m.id]: !isExpanded }))}
+                      className="flex items-center gap-2 min-w-0 flex-1 text-left hover:text-text-primary transition-colors"
+                    >
+                      <ChevronRight
+                        size={12}
+                        className={`text-text-muted transition-transform flex-shrink-0 ${isExpanded ? "rotate-90" : ""}`}
+                      />
+                      <ProviderBadge providerId={m.providerId} />
+                      <span className="text-text-primary truncate font-mono">{m.id}</span>
+                      {m.id === settings.defaultModel && (
+                        <span className="shrink-0 text-[10px] text-warning">{t("settings.defaultModel")}</span>
+                      )}
+                      {result?.status === "ok" && (
+                        <span className="shrink-0 flex items-center gap-0.5 text-[10px] text-success">
+                          <CheckCircle size={10} /> {t("settings.testOk")}
+                        </span>
+                      )}
+                      {result?.status === "error" && (
+                        <span className="shrink-0 flex items-center gap-0.5 text-[10px] text-error" title={result.error}>
+                          <XCircle size={10} /> {t("settings.testFailed")}
+                        </span>
+                      )}
+                    </button>
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      <button
+                        onClick={() => handleTest(m)}
+                        disabled={result?.status === "testing"}
+                        className="p-1 rounded text-text-muted hover:text-accent hover:bg-accent/10
+                                   transition-colors disabled:opacity-40"
+                        title={t("settings.testModel")}
+                      >
+                        {result?.status === "testing" ? (
+                          <Loader2 size={13} className="animate-spin" />
+                        ) : (
+                          <Zap size={13} />
+                        )}
+                      </button>
+                      <button
+                        onClick={() => updateSettings({ defaultModel: settings.defaultModel === m.id ? "" : m.id })}
+                        className={`p-1 rounded transition-colors ${
+                          m.id === settings.defaultModel
+                            ? "text-warning"
+                            : "text-text-muted hover:text-warning opacity-0 group-hover:opacity-100"
+                        }`}
+                        title={t("settings.setDefault")}
+                      >
+                        <Star size={13} fill={m.id === settings.defaultModel ? "currentColor" : "none"} />
+                      </button>
+                      <button
+                        onClick={() => {
+                          const newModels = settings.models.filter((x) => x.id !== m.id);
+                          const updates: { models: ModelConfig[]; model?: string; defaultModel?: string } = { models: newModels };
+                          if (settings.model === m.id) {
+                            updates.model = newModels[0]?.id || "";
+                          }
+                          if (settings.defaultModel === m.id) {
+                            updates.defaultModel = "";
+                          }
+                          updateSettings(updates);
+                        }}
+                        className="p-1 rounded hover:bg-error/20 text-text-muted hover:text-error
+                                   transition-colors opacity-0 group-hover:opacity-100"
+                        title={t("settings.removeModel")}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </div>
+                  {isExpanded && (
+                    <div className="border-t border-border/50 px-3 py-2 space-y-1.5 bg-bg-primary/40">
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="text-text-muted w-14 shrink-0">{t("settings.baseUrl")}</span>
+                        <span className="font-mono text-text-secondary truncate flex-1" title={baseUrl}>
+                          {baseUrl || "—"}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="text-text-muted w-14 shrink-0">{t("settings.apiKey")}</span>
+                        <span className="font-mono text-text-secondary truncate flex-1">
+                          {isRevealed ? (apiKey || "—") : maskKey(apiKey)}
+                        </span>
+                        {apiKey && (
+                          <button
+                            onClick={() => setRevealed((p) => ({ ...p, [m.id]: !isRevealed }))}
+                            className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-bg-tertiary/50 transition-colors"
+                            title={isRevealed ? t("settings.hideKey") : t("settings.revealKey")}
+                          >
+                            {isRevealed ? <EyeOff size={12} /> : <Eye size={12} />}
+                          </button>
+                        )}
+                      </div>
+                      {result?.status === "error" && result.error && (
+                        <div className="text-[11px] text-error break-words pt-1 border-t border-border/40">
+                          {result.error}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-xs text-text-muted py-4 text-center rounded-lg border border-dashed border-border">
+            {t("settings.modelsHint")}
           </p>
         )}
-        {modelError && (
-          <p className="text-xs text-error mt-1">{modelError}</p>
-        )}
-        {settings.models.length > 0 && (
-          <div className="mt-2 space-y-1">
-            {settings.models.map((m) => (
-              <div
-                key={m}
-                className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-bg-secondary text-sm group"
-              >
-                <span className="text-text-primary truncate">
-                  {m}
-                  {m === settings.defaultModel && (
-                    <span className="ml-2 text-xs text-warning">{t("settings.defaultModel")}</span>
-                  )}
-                </span>
-                <div className="flex items-center gap-0.5">
-                  <button
-                    onClick={() => updateSettings({ defaultModel: settings.defaultModel === m ? "" : m })}
-                    className={`p-1 rounded transition-colors ${
-                      m === settings.defaultModel
-                        ? "text-warning"
-                        : "text-text-muted hover:text-warning opacity-0 group-hover:opacity-100"
-                    }`}
-                    title={t("settings.setDefault")}
-                  >
-                    <Star size={13} fill={m === settings.defaultModel ? "currentColor" : "none"} />
-                  </button>
-                  <button
-                    onClick={() => {
-                      const newModels = settings.models.filter((x) => x !== m);
-                      const updates: { models: string[]; model?: string; defaultModel?: string } = { models: newModels };
-                      if (settings.model === m) {
-                        updates.model = newModels[0] || "";
-                      }
-                      if (settings.defaultModel === m) {
-                        updates.defaultModel = "";
-                      }
-                      updateSettings(updates);
-                    }}
-                    className="p-1 rounded hover:bg-error/20 text-text-muted hover:text-error
-                               transition-colors opacity-0 group-hover:opacity-100"
-                    title={t("settings.removeModel")}
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-        <p className="text-xs text-text-muted mt-1">
-          {t("settings.modelsHint")}
-        </p>
       </div>
 
       {/* Model Tier Defaults */}
@@ -342,7 +380,7 @@ function ModelSection() {
                 >
                   <option value="">{t("settings.tierModelDefault")}</option>
                   {settings.models.map((m) => (
-                    <option key={m} value={m}>{m}</option>
+                    <option key={m.id} value={m.id}>{m.id}</option>
                   ))}
                 </select>
                 <ChevronDown
@@ -408,43 +446,12 @@ function ModelSection() {
         </p>
       </div>
 
-      {/* API Key */}
-      <div>
-        <label className="text-sm font-medium text-text-primary block mb-1.5">
-          {t("settings.apiKey")}
-        </label>
-        <input
-          type="password"
-          value={settings.apiKey}
-          onChange={(e) => updateSettings({ apiKey: e.target.value })}
-          placeholder="sk-ant-..."
-          className="w-full rounded-lg bg-input-bg border border-border px-3 py-2 text-sm
-                     text-text-primary placeholder:text-text-muted
-                     focus:outline-none focus:ring-2 focus:ring-accent/50"
-        />
-        <p className="text-xs text-text-muted mt-1">
-          {t("settings.apiKeyHint")}
-        </p>
-      </div>
-
-      {/* Base URL */}
-      <div>
-        <label className="text-sm font-medium text-text-primary block mb-1.5">
-          {t("settings.baseUrl")}
-        </label>
-        <input
-          type="text"
-          value={settings.baseUrl}
-          onChange={(e) => updateSettings({ baseUrl: e.target.value })}
-          placeholder="https://api.anthropic.com"
-          className="w-full rounded-lg bg-input-bg border border-border px-3 py-2 text-sm
-                     text-text-primary placeholder:text-text-muted
-                     focus:outline-none focus:ring-2 focus:ring-accent/50"
-        />
-        <p className="text-xs text-text-muted mt-1">
-          {t("settings.baseUrlHint")}
-        </p>
-      </div>
+      <AddModelDialog
+        open={addOpen}
+        existingIds={settings.models.map((m) => m.id)}
+        onClose={() => setAddOpen(false)}
+        onAdd={handleAdd}
+      />
     </div>
   );
 }
@@ -483,13 +490,14 @@ function LarkSettingsSection() {
       setLarkConnecting(true);
       setError(null);
       try {
+        const creds = resolveModelCreds(settings.model, settings.models, settings.apiKey, settings.baseUrl);
         await startLarkBot({
           app_id: config.appId,
           app_secret: config.appSecret,
           project_dir: settings.workingDirectory || undefined,
           model: settings.model || undefined,
-          api_key: settings.apiKey || undefined,
-          base_url: settings.baseUrl || undefined,
+          api_key: creds.apiKey || undefined,
+          base_url: creds.baseUrl || undefined,
         });
         setStatus("connecting");
       } catch (err) {
@@ -618,13 +626,15 @@ function LarkSettingsSection() {
 // ── About Tab ─────────────────────────────────────────────────────────
 
 function AboutSection({
-  updateStatus, onCheckUpdate, onRestart, onOpenDebug, onClose,
+  updateStatus, onCheckUpdate, onRestart, onOpenDebug, onClose, onShowReleaseNotes, onShowChangelog,
 }: {
   updateStatus: UpdateStatus | null;
   onCheckUpdate?: () => Promise<void>;
   onRestart?: () => void;
   onOpenDebug?: () => void;
   onClose: () => void;
+  onShowReleaseNotes?: () => void;
+  onShowChangelog?: () => void;
 }) {
   const t = useT();
   const [appVersion, setAppVersion] = useState("");
@@ -633,6 +643,10 @@ function AboutSection({
   useEffect(() => {
     getVersion().then(setAppVersion).catch(() => {});
   }, []);
+
+  const isNetworkError = (msg: string): boolean => {
+    return /network|timeout|timed out|econn|enotfound|dns|fetch|unreachable|aborted|connection|socket|host/i.test(msg);
+  };
 
   const handleCheckUpdate = async () => {
     if (!onCheckUpdate || isChecking) return;
@@ -653,9 +667,30 @@ function AboutSection({
         </label>
         <div className="rounded-xl border border-border bg-bg-secondary/50 p-4 space-y-3">
           <div className="flex items-center justify-between">
-            <span className="text-sm font-semibold text-text-primary">
-              ClaudeBox <span className="font-mono text-text-secondary">v{appVersion}</span>
-            </span>
+            {onShowChangelog ? (
+              <button
+                onClick={onShowChangelog}
+                className="text-sm font-semibold text-text-primary hover:text-accent
+                           transition-colors inline-flex items-baseline gap-1.5 cursor-pointer"
+                title={t("changelog.viewHistory")}
+              >
+                ClaudeBox <span className="font-mono text-text-secondary group-hover:text-accent">v{appVersion}</span>
+              </button>
+            ) : (
+              <span className="text-sm font-semibold text-text-primary">
+                ClaudeBox <span className="font-mono text-text-secondary">v{appVersion}</span>
+              </span>
+            )}
+            {onShowChangelog && (
+              <button
+                onClick={onShowChangelog}
+                className="text-xs text-text-muted hover:text-accent transition-colors
+                           inline-flex items-center gap-1 cursor-pointer"
+              >
+                <History size={11} />
+                {t("changelog.viewHistory")}
+              </button>
+            )}
           </div>
 
           {/* Update status */}
@@ -685,7 +720,25 @@ function AboutSection({
                 {t("about.newVersion", { version: updateStatus.version })}
               </span>
             ) : updateStatus?.error ? (
-              <span className="text-xs text-warning">{updateStatus.error}</span>
+              <div className="space-y-1.5">
+                <div className="flex items-start gap-1.5 text-warning">
+                  <AlertTriangle size={12} className="mt-0.5 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">
+                      {t(isNetworkError(updateStatus.error) ? "about.updateNetworkError" : "about.updateError")}
+                    </p>
+                    <p className="text-[11px] text-text-muted mt-0.5">
+                      {t("about.updateErrorHint")}
+                    </p>
+                  </div>
+                </div>
+                <details className="text-[10px] text-text-muted ml-[18px]">
+                  <summary className="cursor-pointer hover:text-text-secondary select-none">
+                    {t("about.updateErrorDetails")}
+                  </summary>
+                  <p className="mt-1 font-mono break-words text-text-muted/80">{updateStatus.error}</p>
+                </details>
+              </div>
             ) : (
               <span className="text-success flex items-center gap-1.5">
                 <CheckCircle size={12} />
@@ -693,6 +746,21 @@ function AboutSection({
               </span>
             )}
           </div>
+
+          {/* View release notes (when an update is available/ready) */}
+          {onShowReleaseNotes &&
+            updateStatus?.available &&
+            updateStatus.version &&
+            updateStatus.body && (
+              <button
+                onClick={onShowReleaseNotes}
+                className="text-xs text-accent hover:text-accent-hover transition-colors
+                           inline-flex items-center gap-1"
+              >
+                <FileText size={11} />
+                {t("update.viewNotes")}
+              </button>
+            )}
 
           {/* Check for updates button */}
           {onCheckUpdate && !updateStatus?.downloading && !updateStatus?.downloaded && (
@@ -710,7 +778,7 @@ function AboutSection({
               ) : (
                 <RefreshCw size={12} />
               )}
-              {isChecking ? t("about.checking") : t("about.checkUpdate")}
+              {isChecking ? t("about.checking") : updateStatus?.error ? t("about.retry") : t("about.checkUpdate")}
             </button>
           )}
         </div>
@@ -747,11 +815,13 @@ interface SettingsDialogProps {
   updateStatus?: UpdateStatus | null;
   onRestart?: () => void;
   onCheckUpdate?: () => Promise<void>;
+  onShowReleaseNotes?: () => void;
+  onShowChangelog?: () => void;
 }
 
 export default function SettingsDialog({
   open, onClose, onClaudeStatusChange, onOpenDebug,
-  updateStatus, onRestart, onCheckUpdate,
+  updateStatus, onRestart, onCheckUpdate, onShowReleaseNotes, onShowChangelog,
 }: SettingsDialogProps) {
   const { settings } = useSettingsStore();
   const t = useT();
@@ -840,6 +910,8 @@ export default function SettingsDialog({
             onRestart={onRestart}
             onOpenDebug={onOpenDebug}
             onClose={onClose}
+            onShowReleaseNotes={onShowReleaseNotes}
+            onShowChangelog={onShowChangelog}
           />
         );
     }

@@ -41,3 +41,9 @@ npm-debug.log*
 
 # ── Claude Code local config ─────────────────────────────
 .claude/
+
+# ── Playwright MCP scratch ────────────────────────────────
+.playwright-mcp/
+
+# ── Local test artifacts ──────────────────────────────────
+test-share-*.png

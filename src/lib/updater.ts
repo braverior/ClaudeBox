@@ -1,11 +1,13 @@
 import { check, type Update, type DownloadEvent } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { emitDebug, probeUrl } from "./claude-ipc";
+import { storageRead, storageWrite, storageRemove } from "./storage";
 
 export interface UpdateStatus {
   available: boolean;
   version?: string;
   body?: string;
+  date?: string;
   downloading: boolean;
   downloaded: boolean;
   error?: string;
@@ -122,6 +124,7 @@ export async function checkAndDownloadUpdate(
       available: true,
       version: update.version,
       body: update.body ?? undefined,
+      date: update.date ?? undefined,
       downloading: true,
       downloaded: false,
     });
@@ -163,11 +166,24 @@ export async function checkAndDownloadUpdate(
 
     log("info", `Update staged, total elapsed: ${elapsed()}`);
 
+    // Persist release notes so the app can show a "What's new" dialog
+    // after the user restarts into the new version.
+    try {
+      await savePendingReleaseNotes({
+        version: update.version,
+        body: update.body ?? "",
+        date: update.date ?? "",
+      });
+    } catch (err) {
+      log("warn", `Failed to persist release notes: ${err}`);
+    }
+
     // Ready to install — prompt user to restart
     onStatus({
       available: true,
       version: update.version,
       body: update.body ?? undefined,
+      date: update.date ?? undefined,
       downloading: false,
       downloaded: true,
     });
@@ -192,4 +208,42 @@ export async function checkAndDownloadUpdate(
 export async function applyUpdateAndRelaunch(): Promise<void> {
   log("info", "Relaunching app to apply update...");
   await relaunch();
+}
+
+// ── Release notes persistence ─────────────────────────────────────────
+// After a successful download, we save `{version, body, date}` so that
+// the next launch (running the new version) can show a "What's new" dialog.
+
+const PENDING_RELEASE_NOTES_KEY = "pending_release_notes";
+
+export interface PendingReleaseNotes {
+  version: string;
+  body: string;
+  date: string;
+}
+
+async function savePendingReleaseNotes(notes: PendingReleaseNotes): Promise<void> {
+  await storageWrite(PENDING_RELEASE_NOTES_KEY, JSON.stringify(notes));
+}
+
+export async function readPendingReleaseNotes(): Promise<PendingReleaseNotes | null> {
+  try {
+    const raw = await storageRead(PENDING_RELEASE_NOTES_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (typeof parsed?.version !== "string") return null;
+    return {
+      version: parsed.version,
+      body: typeof parsed.body === "string" ? parsed.body : "",
+      date: typeof parsed.date === "string" ? parsed.date : "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function clearPendingReleaseNotes(): Promise<void> {
+  try {
+    await storageRemove(PENDING_RELEASE_NOTES_KEY);
+  } catch { /* ignore */ }
 }

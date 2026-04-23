@@ -1,9 +1,12 @@
 import { create } from "zustand";
 import { storageRead, storageWrite } from "../lib/storage";
+import { detectProviderByBaseUrl, type ModelConfig } from "../lib/providers";
+
+export type { ModelConfig };
 
 export interface Settings {
   model: string;
-  models: string[];
+  models: ModelConfig[];
   defaultModel: string;
   haikuModel: string;
   sonnetModel: string;
@@ -64,6 +67,30 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   ]);
 }
 
+function migrateSettings(raw: any): Settings {
+  const merged = { ...defaultSettings, ...raw };
+  const models = merged.models;
+  if (Array.isArray(models) && models.length > 0 && typeof models[0] === "string") {
+    const globalKey = typeof merged.apiKey === "string" ? merged.apiKey : "";
+    const globalUrl = typeof merged.baseUrl === "string" ? merged.baseUrl : "";
+    const providerId = detectProviderByBaseUrl(globalUrl);
+    merged.models = (models as string[]).map((id) => ({
+      id,
+      providerId,
+      baseUrl: globalUrl,
+      apiKey: globalKey,
+    }));
+  } else if (!Array.isArray(models)) {
+    merged.models = [];
+  } else {
+    // Rename legacy "alibaba" providerId to "qwen"
+    merged.models = (models as ModelConfig[]).map((m) =>
+      m.providerId === "alibaba" ? { ...m, providerId: "qwen" } : m
+    );
+  }
+  return merged as Settings;
+}
+
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   settings: defaultSettings,
   loaded: false,
@@ -73,7 +100,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     try {
       const data = await withTimeout(storageRead(STORAGE_KEY), 5000);
       if (data) {
-        set({ settings: { ...defaultSettings, ...JSON.parse(data) }, loaded: true });
+        set({ settings: migrateSettings(JSON.parse(data)), loaded: true });
         return;
       }
     } catch { /* ignore */ }
@@ -82,7 +109,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     try {
       const lsData = localStorage.getItem(LS_STORAGE_KEY);
       if (lsData) {
-        const parsed = { ...defaultSettings, ...JSON.parse(lsData) };
+        const parsed = migrateSettings(JSON.parse(lsData));
         // Save to file storage
         await storageWrite(STORAGE_KEY, JSON.stringify(parsed)).catch(() => {});
         // Clean up localStorage

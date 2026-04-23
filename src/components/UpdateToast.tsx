@@ -1,4 +1,4 @@
-import { Download, RefreshCw, X } from "lucide-react";
+import { Download, RefreshCw, X, FileText } from "lucide-react";
 import { useT } from "../lib/i18n";
 
 interface UpdateToastProps {
@@ -7,6 +7,7 @@ interface UpdateToastProps {
   downloading: boolean;
   onRestart: () => void;
   onDismiss: () => void;
+  onShowNotes?: () => void;
 }
 
 export default function UpdateToast({
@@ -15,6 +16,7 @@ export default function UpdateToast({
   downloading,
   onRestart,
   onDismiss,
+  onShowNotes,
 }: UpdateToastProps) {
   const t = useT();
 
@@ -41,8 +43,15 @@ export default function UpdateToast({
             ? t("update.downloading", { version })
             : t("update.ready", { version })}
         </p>
-        {body && !downloading && (
-          <p className="text-xs text-text-secondary mt-0.5 truncate">{body}</p>
+        {onShowNotes && body && !downloading && (
+          <button
+            onClick={onShowNotes}
+            className="mt-0.5 text-[11px] text-accent hover:text-accent-hover transition-colors
+                       inline-flex items-center gap-1 cursor-pointer"
+          >
+            <FileText size={10} />
+            {t("update.viewNotes")}
+          </button>
         )}
       </div>
 
@@ -68,3 +77,4 @@ export default function UpdateToast({
     </div>
   );
 }
+

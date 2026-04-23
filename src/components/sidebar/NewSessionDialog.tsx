@@ -69,11 +69,11 @@ export default function NewSessionDialog({
             >
               <option value="">Default (Sonnet)</option>
               {settings.models.map((m) => (
-                <option key={m} value={m}>{m}</option>
+                <option key={m.id} value={m.id}>{m.id}</option>
               ))}
-              {!settings.models.includes("sonnet") && <option value="sonnet">Sonnet</option>}
-              {!settings.models.includes("opus") && <option value="opus">Opus</option>}
-              {!settings.models.includes("haiku") && <option value="haiku">Haiku</option>}
+              {!settings.models.some((x) => x.id === "sonnet") && <option value="sonnet">Sonnet</option>}
+              {!settings.models.some((x) => x.id === "opus") && <option value="opus">Opus</option>}
+              {!settings.models.some((x) => x.id === "haiku") && <option value="haiku">Haiku</option>}
             </select>
           </div>
 

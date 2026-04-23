@@ -115,3 +115,29 @@ System proxy is detected via `scutil --proxy` (macOS) or registry (Windows) and 
 ## Signing & release
 
 macOS release requires `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_ID_PASSWORD`, `APPLE_TEAM_ID` (notarization). Tauri updater signing uses `TAURI_SIGNING_PRIVATE_KEY` / `_PASSWORD`. See `build.sh` header for the full env var list and `docs/code-signing.md` for the cert setup.
+
+## Release workflow (CHANGELOG required before tagging)
+
+Before pushing a new `vX.Y.Z` tag, always update `CHANGELOG.md` at the repo root. The app bundles this file (`import "../../CHANGELOG.md?raw"` in `src/lib/changelog.ts`) and renders it in the in-app history dialog, so GitHub outage does **not** affect users seeing release notes.
+
+Steps:
+1. Bump `version` in `src-tauri/tauri.conf.json` (and `package.json` if mirrored).
+2. Run `git log <previous-tag>..HEAD --oneline --no-merges` to list new commits since last tag.
+3. Prepend a new section to `CHANGELOG.md` using Keep-a-Changelog format:
+   ```
+   ## [X.Y.Z] - YYYY-MM-DD
+
+   ### 新增
+   - …
+
+   ### 优化
+   - …
+
+   ### 修复
+   - …
+   ```
+   Group commits by category; drop noisy/internal-only commits; write user-facing Chinese bullets (the dialog audience is end users). Omit empty subsections.
+4. Commit: `git commit -am "vX.Y.Z: <短描述>"` then `git tag vX.Y.Z && git push --follow-tags`.
+5. `./build.sh all` to build/sign/publish.
+
+The parser at `src/lib/changelog.ts` relies on the `## [X.Y.Z] - YYYY-MM-DD` heading format — don't change it without updating the regex.

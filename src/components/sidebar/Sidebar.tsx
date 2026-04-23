@@ -13,6 +13,7 @@ import {
   BarChart2,
   Loader2,
   Send,
+  History,
 } from "lucide-react";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -32,6 +33,7 @@ interface SidebarProps {
   updateStatus: UpdateStatus | null;
   onRestart: () => void;
   onCheckUpdate: () => Promise<void>;
+  onShowChangelog: () => void;
 }
 
 export default function Sidebar({
@@ -40,6 +42,7 @@ export default function Sidebar({
   updateStatus,
   onRestart,
   onCheckUpdate,
+  onShowChangelog,
 }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [versionPopover, setVersionPopover] = useState(false);
@@ -241,6 +244,17 @@ export default function Sidebar({
           {isChecking ? t("version.checking") : t("version.checkUpdate")}
         </button>
       )}
+      {/* Changelog link */}
+      <button
+        onClick={() => { setVersionPopover(false); onShowChangelog(); }}
+        className="mt-1.5 w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg
+                   text-xs font-medium text-text-secondary
+                   hover:bg-bg-tertiary/50 hover:text-text-primary
+                   transition-colors cursor-pointer"
+      >
+        <History size={11} />
+        {t("changelog.viewHistory")}
+      </button>
     </div>
   );
 

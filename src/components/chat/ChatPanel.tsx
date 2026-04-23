@@ -5,6 +5,7 @@ import { useTaskStore } from "../../stores/taskStore";
 import { sendMessage, stopSession, onStream, getGitBranch, listGitBranches, checkoutGitBranch, sendResponse, clearSessionResume, openInTerminal, gitDiffFiles, getContextTokens } from "../../lib/claude-ipc";
 import { larkSendCommand } from "../../lib/lark-ipc";
 import { useLarkStore } from "../../stores/larkStore";
+import { resolveModelCreds } from "../../lib/providers";
 import { getCurrentWindow, PhysicalSize } from "@tauri-apps/api/window";
 import { useT } from "../../lib/i18n";
 import { startWindowDrag } from "../../lib/utils";
@@ -475,7 +476,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
   >({});
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
   const [changedFiles, setChangedFiles] = useState<Set<string>>(new Set());
-  const [contextTokens, setContextTokens] = useState<number | null>(null);
+  const [contextTokensCache, setContextTokensCache] = useState<Record<string, number>>({});
   const [fileTreeRefreshKey, setFileTreeRefreshKey] = useState(0);
   const toolNameMapRef = useRef<Map<string, string>>(new Map());
 
@@ -539,15 +540,20 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
     return () => clearInterval(timer);
   }, [currentSession?.projectPath]);
 
-  // Poll context tokens from JSONL session file every 5s
+  // Poll context tokens from JSONL session file every 5s.
+  // Cache per session so switching sessions doesn't clear the bar (avoids flash).
   useEffect(() => {
-    setContextTokens(null);
     const sessionId = currentSession?.claudeSessionId;
     const projectPath = currentSession?.projectPath;
     if (!sessionId || !projectPath) return;
+    const key = `${sessionId}|${projectPath}`;
     const refresh = () => {
       getContextTokens(sessionId, projectPath)
-        .then((tokens) => { if (tokens != null) setContextTokens(tokens); })
+        .then((tokens) => {
+          if (tokens != null) {
+            setContextTokensCache((prev) => (prev[key] === tokens ? prev : { ...prev, [key]: tokens }));
+          }
+        })
         .catch(() => {});
     };
     refresh();
@@ -635,6 +641,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
       clearError();
       try {
         const resumeId = currentSession.claudeSessionId || undefined;
+        const creds = resolveModelCreds(currentSession.model, settings.models, settings.apiKey, settings.baseUrl);
         const pid = await sendMessage({
           session_id: currentSessionId,
           message: content,
@@ -643,8 +650,8 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
           permission_mode: currentSession.permissionMode || undefined,
           claude_path: settings.claudePath || undefined,
           allowed_tools: currentSession.allowedTools ?? [],
-          api_key: settings.apiKey || undefined,
-          base_url: settings.baseUrl || undefined,
+          api_key: creds.apiKey || undefined,
+          base_url: creds.baseUrl || undefined,
           attachments: attachments?.map((a) => ({
             path: a.path,
             name: a.name,
@@ -840,6 +847,12 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
     }
     return undefined;
   })();
+
+  const contextTokensKey =
+    currentSession?.claudeSessionId && currentSession?.projectPath
+      ? `${currentSession.claudeSessionId}|${currentSession.projectPath}`
+      : null;
+  const contextTokens = contextTokensKey ? contextTokensCache[contextTokensKey] ?? null : null;
 
   // Compute duration from stream start
   const streamStartTime = currentSessionId ? streamStartTimes[currentSessionId] : undefined;
@@ -1067,7 +1080,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
             isStreaming={isStreaming}
             disabled={!claudeAvailable}
             model={currentSession?.model || ""}
-            models={settings.models}
+            models={settings.models.map((m) => m.id)}
             onModelChange={handleModelChange}
             gitBranch={gitBranch}
             projectPath={currentSession?.projectPath}
