@@ -24,7 +24,7 @@ import { useSettingsStore } from "../../stores/settingsStore";
 import { useLarkStore, type LarkStatus } from "../../stores/larkStore";
 import { startLarkBot, stopLarkBot } from "../../lib/lark-ipc";
 import { useT } from "../../lib/i18n";
-import { startWindowDrag } from "../../lib/utils";
+import { startWindowDrag, isWindows, handleTitleBarDoubleClick } from "../../lib/utils";
 import type { UpdateStatus } from "../../lib/updater";
 
 interface SidebarProps {
@@ -423,7 +423,7 @@ export default function Sidebar({
     return (
       <div className="w-[70px] border-r border-border bg-bg-secondary flex flex-col items-center">
         {/* macOS traffic light spacing */}
-        <div data-tauri-drag-region onMouseDown={startWindowDrag} className="h-12 w-full flex-shrink-0" />
+        <div data-tauri-drag-region onMouseDown={startWindowDrag} onDoubleClick={handleTitleBarDoubleClick} className={`${isWindows ? "h-4" : "h-12"} w-full flex-shrink-0`} />
         <button
           onClick={() => setCollapsed(false)}
           className="p-2 rounded-lg hover:bg-bg-tertiary/50 text-text-secondary hover:text-text-primary transition-colors"
@@ -493,7 +493,8 @@ export default function Sidebar({
       <div
         data-tauri-drag-region
         onMouseDown={startWindowDrag}
-        className="flex items-center pl-[78px] pr-3 h-14 flex-shrink-0"
+        onDoubleClick={handleTitleBarDoubleClick}
+        className={`flex items-center ${isWindows ? "pl-4" : "pl-[78px]"} pr-3 h-14 flex-shrink-0`}
       >
         <h1 data-tauri-drag-region className="text-sm font-bold text-text-primary tracking-wide pointer-events-none mt-2">
           ClaudeBox

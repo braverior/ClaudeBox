@@ -47,7 +47,7 @@
       "hardenedRuntime": true,
       "minimumSystemVersion": "10.13"
     },
-    "createUpdaterArtifacts": true
+    "createUpdaterArtifacts": false
   },
   "plugins": {
     "shell": {

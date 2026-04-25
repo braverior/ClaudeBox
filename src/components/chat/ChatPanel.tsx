@@ -8,7 +8,8 @@ import { useLarkStore } from "../../stores/larkStore";
 import { resolveModelCreds } from "../../lib/providers";
 import { getCurrentWindow, PhysicalSize } from "@tauri-apps/api/window";
 import { useT } from "../../lib/i18n";
-import { startWindowDrag } from "../../lib/utils";
+import { startWindowDrag, handleTitleBarDoubleClick, isWindows } from "../../lib/utils";
+import WindowControls from "../WindowControls";
 import MessageBubble from "./MessageBubble";
 import ToolCallCard from "./ToolCallCard";
 import InputArea, { type Attachment } from "./InputArea";
@@ -865,8 +866,11 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
         <div
           data-tauri-drag-region
           onMouseDown={startWindowDrag}
-          className="h-14 flex-shrink-0"
-        />
+          onDoubleClick={handleTitleBarDoubleClick}
+          className="h-14 flex-shrink-0 flex items-center justify-end"
+        >
+          <WindowControls />
+        </div>
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center px-8">
             <div className="w-16 h-16 rounded-2xl bg-accent/10 flex items-center justify-center mx-auto mb-4">
@@ -897,8 +901,10 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
         className="flex items-center gap-3 px-4 border-b border-border bg-bg-secondary/50 h-14 flex-shrink-0"
         onMouseDown={(e) => {
           if ((e.target as HTMLElement).closest("button")) return;
+          if (isWindows && e.detail >= 2) return;
           getCurrentWindow().startDragging();
         }}
+        onDoubleClick={handleTitleBarDoubleClick}
       >
         <FolderOpen size={14} className="text-text-muted pointer-events-none" />
         <span
@@ -934,6 +940,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
         >
           {showFilePanel ? <PanelRightClose size={16} /> : <PanelRight size={16} />}
         </button>
+        <WindowControls />
       </div>
 
       {/* Main content area with optional file panel */}

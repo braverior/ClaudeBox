@@ -1,3 +1,6 @@
+export const isWindows = navigator.userAgent.includes("Windows");
+export const isMacOS = navigator.userAgent.includes("Macintosh");
+
 /** Generate a UUID-v4-style random ID */
 export function v4Style(): string {
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
@@ -66,7 +69,7 @@ export function truncate(text: string, maxLength: number): string {
  * Pre-cache the Tauri window API so startDragging() can be called
  * synchronously during mousedown — macOS requires this for drag to work.
  */
-let _getCurrentWindow: (() => { startDragging: () => Promise<void> }) | null = null;
+let _getCurrentWindow: (() => any) | null = null;
 import("@tauri-apps/api/window")
   .then((m) => { _getCurrentWindow = m.getCurrentWindow; })
   .catch(() => {});
@@ -79,5 +82,13 @@ import("@tauri-apps/api/window")
 export function startWindowDrag(e: React.MouseEvent) {
   const target = e.target as HTMLElement;
   if (target.closest("button, a, input, select, textarea, [role='button']")) return;
+  if (isWindows && e.detail >= 2) return;
   _getCurrentWindow?.().startDragging();
+}
+
+export function handleTitleBarDoubleClick(e: React.MouseEvent) {
+  if (!isWindows) return;
+  const target = e.target as HTMLElement;
+  if (target.closest("button, a, input, select, textarea, [role='button']")) return;
+  _getCurrentWindow?.().toggleMaximize();
 }

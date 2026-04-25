@@ -19,6 +19,14 @@ pub fn run() {
             // Clean up stale clipboard images from previous sessions
             claude::cleanup_old_tmp_images();
 
+            #[cfg(target_os = "windows")]
+            {
+                use tauri::Manager;
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_decorations(false);
+                }
+            }
+
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
