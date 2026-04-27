@@ -12,6 +12,7 @@ import { useT } from "../../lib/i18n";
 import { parseSkills } from "../../lib/skills";
 import { useSkillsStore } from "../../stores/skillsStore";
 import { useSettingsStore } from "../../stores/settingsStore";
+import { useImageViewerStore } from "../../stores/imageViewerStore";
 
 export interface Attachment {
   path: string;
@@ -615,8 +616,8 @@ function AttachmentChip({
     return (
       <div
         className={`relative group rounded-lg overflow-hidden border ${style.border} flex-shrink-0 cursor-pointer`}
-        onDoubleClick={onOpen}
-        title={att.name}
+        onClick={onOpen}
+        title={`${att.name}\n点击查看`}
       >
         {att.dataUrl ? (
           <img src={att.dataUrl} alt={att.name} className="w-16 h-16 object-cover" />
@@ -814,6 +815,7 @@ export default function InputArea({
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const t = useT();
+  const openImage = useImageViewerStore((s) => s.openImage);
 
   const handleSkillSelect = useCallback((skillName: string) => {
     setInput(`/${skillName} `);
@@ -927,8 +929,12 @@ export default function InputArea({
   }, []);
 
   const openAttachment = useCallback((att: Attachment) => {
-    shellOpen(att.path).catch(() => {});
-  }, []);
+    if (att.type === "image" && att.dataUrl) {
+      openImage(att.dataUrl, att.name, att.path);
+    } else {
+      shellOpen(att.path).catch(() => {});
+    }
+  }, [openImage]);
 
   const handleSend = useCallback(() => {
     const trimmed = input.trim();

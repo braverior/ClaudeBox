@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "ClaudeBox",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "identifier": "com.claudebox.desktop",
   "build": {
     "frontendDist": "../dist",
@@ -47,7 +47,7 @@
       "hardenedRuntime": true,
       "minimumSystemVersion": "10.13"
     },
-    "createUpdaterArtifacts": false
+    "createUpdaterArtifacts": true
   },
   "plugins": {
     "shell": {

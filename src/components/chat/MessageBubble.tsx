@@ -11,6 +11,7 @@ import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import QRCode from "qrcode";
 import logoUrl from "../../assets/app-icon.png";
 import { copyImageToClipboard } from "../../lib/claude-ipc";
+import { useImageViewerStore } from "../../stores/imageViewerStore";
 import type { ComponentPropsWithoutRef } from "react";
 
 // remarkGfmSafe: tables / strikethrough / task-lists without autolink-literal
@@ -362,6 +363,7 @@ export default function MessageBubble({
 }: MessageBubbleProps) {
   const isUser = message.role === "user";
   const t = useT();
+  const openImage = useImageViewerStore((s) => s.openImage);
   const contentRef = useRef<HTMLDivElement>(null);
   const sharePopoverRef = useRef<HTMLDivElement>(null);
   const [shareOpen, setShareOpen] = useState(false);
@@ -854,8 +856,10 @@ export default function MessageBubble({
                     key={i}
                     className="relative rounded-xl overflow-hidden border border-border/50 cursor-pointer
                                hover:border-accent/40 transition-colors shadow-sm"
-                    onDoubleClick={() => openFile(att.path)}
-                    title={`${att.name}\nDouble-click to open`}
+                    onClick={() => {
+                      if (att.dataUrl) openImage(att.dataUrl, att.name, att.path);
+                    }}
+                    title={`${att.name}\n点击查看`}
                   >
                     {att.dataUrl ? (
                       <img src={att.dataUrl} alt={att.name} className="max-w-[240px] max-h-[180px] object-cover" />

@@ -3,6 +3,7 @@ import { X, Copy, Check, Loader2, Code2, Eye, Minus, Save } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfmSafe from "../../lib/remark-gfm-safe";
 import { readFile, readImageBase64, writeFile } from "../../lib/claude-ipc";
+import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { useT } from "../../lib/i18n";
 import CodeBlock from "./CodeBlock";
 import hljs from "highlight.js";
@@ -431,6 +432,19 @@ const TabContent = memo(function TabContent({ filePath, isActive, onDirtyChange 
               <ReactMarkdown
                 remarkPlugins={remarkPlugins}
                 components={{
+                  a({ href, children }) {
+                    return (
+                      <a
+                        href={href}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          if (href) shellOpen(href).catch(() => {});
+                        }}
+                      >
+                        {children}
+                      </a>
+                    );
+                  },
                   code(props: ComponentPropsWithoutRef<"code">) {
                     const { className, children, ...rest } = props;
                     const match = /language-(\w+)/.exec(className || "");

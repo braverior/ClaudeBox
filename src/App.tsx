@@ -7,6 +7,8 @@ import DebugPanel from "./components/debug/DebugPanel";
 import UpdateToast from "./components/UpdateToast";
 import ReleaseNotesDialog, { type ReleaseNotesMode } from "./components/ReleaseNotesDialog";
 import ChangelogDialog from "./components/ChangelogDialog";
+import ImageLightbox from "./components/chat/ImageLightbox";
+import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { checkClaudeInstalled, applySystemProxy, emitDebug, sendMessage, onStream } from "./lib/claude-ipc";
 import {
   checkAndDownloadUpdate,
@@ -126,6 +128,26 @@ export default function App() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  // Global fallback: prevent any <a href="http(s)://..."> click from navigating
+  // the webview away (would replace the app content and require a restart).
+  // Route to the system browser instead. Runs in bubble phase so component-level
+  // onClick handlers (which call preventDefault) take precedence.
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (e.defaultPrevented) return;
+      const target = e.target as HTMLElement | null;
+      const anchor = target?.closest?.("a") as HTMLAnchorElement | null;
+      if (!anchor) return;
+      const href = anchor.getAttribute("href");
+      if (!href) return;
+      if (!/^https?:\/\//i.test(href)) return;
+      e.preventDefault();
+      shellOpen(href).catch(() => {});
+    };
+    document.addEventListener("click", handler);
+    return () => document.removeEventListener("click", handler);
   }, []);
 
   // ── System proxy: detect on startup + poll every 30s for changes ──
@@ -492,6 +514,8 @@ export default function App() {
         currentVersion={appVersion}
         onClose={() => setChangelogOpen(false)}
       />
+
+      <ImageLightbox />
 
       {/* Close confirm dialog */}
       {closeConfirmOpen && (
