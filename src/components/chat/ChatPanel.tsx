@@ -1099,6 +1099,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
             onClearSession={handleClearSession}
             contextTokens={contextTokens ?? undefined}
             contextWindow={sdkContextWindow}
+            streamStartTime={streamStartTime}
           />
         </div>
 

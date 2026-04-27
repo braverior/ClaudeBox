@@ -227,6 +227,11 @@ export async function writeFile(path: string, content: string): Promise<void> {
   return invoke("write_file", { path, content });
 }
 
+/** Copy a file from src to dest (preserves binary contents) */
+export async function copyFile(src: string, dest: string): Promise<void> {
+  return invoke("copy_file", { src, dest });
+}
+
 /** Read an image file as a data: URL (base64) */
 export async function readImageBase64(path: string): Promise<string> {
   return invoke("read_image_base64", { path });

@@ -1514,6 +1514,13 @@ pub fn write_file(path: String, content: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn copy_file(src: String, dest: String) -> Result<(), String> {
+    std::fs::copy(&src, &dest)
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn read_file(path: String) -> Result<String, String> {
     let metadata = std::fs::metadata(&path).map_err(|e| e.to_string())?;
     // Limit to 2MB to avoid memory issues

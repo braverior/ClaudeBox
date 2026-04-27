@@ -57,6 +57,7 @@ pub fn run() {
             claude::list_dir,
             claude::read_file,
             claude::write_file,
+            claude::copy_file,
             claude::read_image_base64,
             claude::save_clipboard_image,
             claude::copy_image_to_clipboard,

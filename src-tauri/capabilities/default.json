@@ -9,6 +9,7 @@
     "shell:default",
     "dialog:default",
     "dialog:allow-open",
+    "dialog:allow-save",
     "core:window:allow-outer-size",
     "core:window:allow-set-size",
     "core:window:allow-start-dragging",

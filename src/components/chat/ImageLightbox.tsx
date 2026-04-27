@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { X, ZoomIn, ZoomOut, RotateCcw, ExternalLink } from "lucide-react";
+import { X, ZoomIn, ZoomOut, RotateCcw, ExternalLink, Download } from "lucide-react";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
+import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { useImageViewerStore } from "../../stores/imageViewerStore";
+import { copyFile } from "../../lib/claude-ipc";
 
 const MIN_SCALE = 0.25;
 const MAX_SCALE = 8;
@@ -107,6 +109,23 @@ export default function ImageLightbox() {
     if (e.target === e.currentTarget) closeImage();
   };
 
+  // Save to local disk via native dialog; copies the source file to preserve binary fidelity
+  const handleSave = async () => {
+    if (!path) return;
+    const extFromName = name?.includes(".") ? name.split(".").pop()!.toLowerCase() : undefined;
+    const ext = extFromName || "png";
+    const dest = await saveDialog({
+      defaultPath: name || `image.${ext}`,
+      filters: [{ name: "Image", extensions: [ext] }],
+    });
+    if (!dest) return;
+    try {
+      await copyFile(path, dest);
+    } catch (err) {
+      console.error("Save image failed:", err);
+    }
+  };
+
   if (!open || !src) return null;
 
   const pct = Math.round(scale * 100);
@@ -119,6 +138,19 @@ export default function ImageLightbox() {
     >
       {/* Top-right toolbar */}
       <div className="absolute top-4 right-4 flex items-center gap-2 z-10">
+        {path && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              handleSave();
+            }}
+            className="w-9 h-9 rounded-lg bg-white/10 hover:bg-white/20 text-white/90 flex items-center justify-center
+                       transition-colors backdrop-blur-md"
+            title="保存到本地"
+          >
+            <Download size={16} />
+          </button>
+        )}
         {path && (
           <button
             onClick={(e) => {

@@ -13,6 +13,7 @@ import { parseSkills } from "../../lib/skills";
 import { useSkillsStore } from "../../stores/skillsStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useImageViewerStore } from "../../stores/imageViewerStore";
+import { formatDuration } from "../../lib/utils";
 
 export interface Attachment {
   path: string;
@@ -94,6 +95,8 @@ interface InputAreaProps {
   contextTokens?: number;
   /** Actual context window size from SDK (e.g. 200000 or 1000000) */
   contextWindow?: number;
+  /** Timestamp when current stream started — drives the elapsed counter in placeholder */
+  streamStartTime?: number;
 }
 
 const USER_TOOLS = [
@@ -810,12 +813,27 @@ export default function InputArea({
   onClearSession,
   contextTokens,
   contextWindow,
+  streamStartTime,
 }: InputAreaProps) {
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const t = useT();
   const openImage = useImageViewerStore((s) => s.openImage);
+
+  // Tick every second while streaming so the placeholder shows elapsed time.
+  const [elapsedMs, setElapsedMs] = useState(0);
+  useEffect(() => {
+    if (!isStreaming || !streamStartTime) {
+      setElapsedMs(0);
+      return;
+    }
+    setElapsedMs(Date.now() - streamStartTime);
+    const id = window.setInterval(() => {
+      setElapsedMs(Date.now() - streamStartTime);
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [isStreaming, streamStartTime]);
 
   const handleSkillSelect = useCallback((skillName: string) => {
     setInput(`/${skillName} `);
@@ -1002,7 +1020,13 @@ export default function InputArea({
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
-            placeholder={isStreaming ? "Claude Code 运行中..." : t("input.placeholder")}
+            placeholder={
+              isStreaming
+                ? streamStartTime
+                  ? `Claude Code 运行中... ${formatDuration(elapsedMs)}`
+                  : "Claude Code 运行中..."
+                : t("input.placeholder")
+            }
             rows={1}
             disabled={disabled}
             className="w-full resize-none bg-transparent px-4 py-2
