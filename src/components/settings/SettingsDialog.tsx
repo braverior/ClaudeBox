@@ -879,6 +879,15 @@ export default function SettingsDialog({
     if (open) recheckAll();
   }, [open, settings.claudePath]);
 
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
   if (!open) return null;
 
   const renderContent = () => {
@@ -920,7 +929,6 @@ export default function SettingsDialog({
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <div className="bg-bg-primary border border-border rounded-2xl w-[600px] h-[600px] flex flex-col shadow-2xl">
         {/* Header */}

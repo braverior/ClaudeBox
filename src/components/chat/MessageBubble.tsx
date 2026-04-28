@@ -4,13 +4,13 @@ import remarkGfmSafe from "../../lib/remark-gfm-safe";
 import type { ChatMessage, ContentBlock, PendingInteraction } from "../../lib/stream-parser";
 import CodeBlock from "./CodeBlock";
 import ToolCallCard, { shortPath } from "./ToolCallCard";
-import { formatTimeWithSeconds, formatDuration } from "../../lib/utils";
+import { formatTimeWithSeconds, formatDuration, formatFileSize } from "../../lib/utils";
 import { useT, type TFunction } from "../../lib/i18n";
-import { User, Loader2, Brain, ChevronDown, ChevronRight, Info, FileCode2, FileText, Image, FileType, Terminal, Globe, Settings2, Rocket, Sparkles, Layers, CheckCircle, CircleStop, Clock, Timer, Hash, DollarSign, RefreshCw, Share2, Copy, ImageIcon, Check } from "lucide-react";
+import { User, Loader2, Brain, ChevronDown, ChevronRight, Info, Image, Rocket, Sparkles, Layers, CheckCircle, CircleStop, Clock, Timer, Hash, DollarSign, RefreshCw, Share2, Copy, ImageIcon, Check } from "lucide-react";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import QRCode from "qrcode";
 import logoUrl from "../../assets/app-icon.png";
-import { copyImageToClipboard } from "../../lib/claude-ipc";
+import { copyImageToClipboard, getFileSize } from "../../lib/claude-ipc";
 import { useImageViewerStore } from "../../stores/imageViewerStore";
 import type { ComponentPropsWithoutRef } from "react";
 
@@ -20,7 +20,7 @@ const remarkPlugins = [remarkGfmSafe];
 
 // ── File category styling (shared with InputArea) ──────────────────
 
-type FileCategory = "code" | "config" | "doc" | "web" | "shell" | "image" | "other";
+type FileCategory = "code" | "config" | "doc" | "web" | "shell" | "image" | "office" | "other";
 
 const EXT_CATEGORY: Record<string, FileCategory> = {
   ts: "code", tsx: "code", js: "code", jsx: "code", py: "code",
@@ -33,6 +33,9 @@ const EXT_CATEGORY: Record<string, FileCategory> = {
   sh: "shell", sql: "shell",
   png: "image", jpg: "image", jpeg: "image", gif: "image",
   webp: "image", bmp: "image",
+  pdf: "office", pptx: "office", ppt: "office",
+  docx: "office", doc: "office",
+  xlsx: "office", xls: "office", xlsm: "office", csv: "office",
 };
 
 const CATEGORY_STYLE: Record<FileCategory, { bg: string; text: string; border: string }> = {
@@ -42,24 +45,82 @@ const CATEGORY_STYLE: Record<FileCategory, { bg: string; text: string; border: s
   web:    { bg: "bg-purple-500/10",  text: "text-purple-400",  border: "border-purple-500/20" },
   shell:  { bg: "bg-orange-500/10",  text: "text-orange-400",  border: "border-orange-500/20" },
   image:  { bg: "bg-rose-500/10",    text: "text-rose-400",    border: "border-rose-500/20" },
+  office: { bg: "bg-sky-500/10",     text: "text-sky-400",     border: "border-sky-500/20" },
   other:  { bg: "bg-zinc-500/10",    text: "text-zinc-400",    border: "border-zinc-500/20" },
 };
 
-function getCategoryIcon(cat: FileCategory) {
-  switch (cat) {
-    case "code":   return FileCode2;
-    case "config": return Settings2;
-    case "doc":    return FileText;
-    case "web":    return Globe;
-    case "shell":  return Terminal;
-    case "image":  return Image;
-    default:       return FileType;
-  }
-}
+/** Office/PDF per-extension palette (overrides `office` category color). */
+const OFFICE_EXT_STYLE: Record<string, { bg: string; text: string; border: string }> = {
+  pdf:  { bg: "bg-red-500/10",     text: "text-red-400",     border: "border-red-500/20" },
+  pptx: { bg: "bg-orange-500/10",  text: "text-orange-400",  border: "border-orange-500/20" },
+  ppt:  { bg: "bg-orange-500/10",  text: "text-orange-400",  border: "border-orange-500/20" },
+  docx: { bg: "bg-sky-500/10",     text: "text-sky-400",     border: "border-sky-500/20" },
+  doc:  { bg: "bg-sky-500/10",     text: "text-sky-400",     border: "border-sky-500/20" },
+  xlsx: { bg: "bg-green-500/10",   text: "text-green-400",   border: "border-green-500/20" },
+  xls:  { bg: "bg-green-500/10",   text: "text-green-400",   border: "border-green-500/20" },
+  xlsm: { bg: "bg-green-500/10",   text: "text-green-400",   border: "border-green-500/20" },
+  csv:  { bg: "bg-green-500/10",   text: "text-green-400",   border: "border-green-500/20" },
+};
 
 function getFileCategory(name: string): FileCategory {
   const ext = name.split(".").pop()?.toLowerCase() || "";
   return EXT_CATEGORY[ext] || "other";
+}
+
+/** Left-logo + right-text chip for non-image attachments in message bubbles.
+ *  Lazily fetches file size for legacy messages persisted before size was stored. */
+function TextAttachmentChip({
+  att,
+  onOpen,
+}: {
+  att: { name: string; type: string; path?: string; size?: number };
+  onOpen: () => void;
+}) {
+  const cat = getFileCategory(att.name);
+  const ext = att.name.split(".").pop()?.toLowerCase() || "";
+  const style = OFFICE_EXT_STYLE[ext] || CATEGORY_STYLE[cat];
+  const extLabel = ext.length > 4 ? ext.slice(0, 4).toUpperCase() : ext.toUpperCase();
+
+  const [size, setSize] = useState<number | undefined>(att.size);
+  useEffect(() => {
+    if (att.size != null || !att.path) return;
+    let cancelled = false;
+    getFileSize(att.path).then((s) => {
+      if (!cancelled) setSize(s);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [att.path, att.size]);
+
+  const sizeStr = formatFileSize(size);
+
+  return (
+    <div
+      className="flex items-center gap-2 pl-1 pr-2.5 py-1 rounded-lg border border-border
+                 bg-bg-secondary cursor-pointer hover:brightness-110 transition-all"
+      onDoubleClick={onOpen}
+      title={`${att.path || att.name}\nDouble-click to open`}
+    >
+      <div
+        className={`flex-shrink-0 w-10 h-10 rounded-md flex items-center justify-center
+                    ${style.bg} border ${style.border}`}
+      >
+        <span
+          className={`font-bold tracking-wider uppercase ${style.text}
+                      ${extLabel.length >= 4 ? "text-[9px]" : "text-[11px]"}`}
+        >
+          {extLabel}
+        </span>
+      </div>
+      <div className="flex flex-col min-w-0 leading-tight">
+        <span className="text-[12px] font-medium text-text-primary truncate max-w-[150px]">
+          {att.name}
+        </span>
+        {sizeStr && (
+          <span className="text-[10px] text-text-muted mt-0.5">{sizeStr}</span>
+        )}
+      </div>
+    </div>
+  );
 }
 
 /** Memoized text block — only re-renders if text actually changes */
@@ -434,11 +495,19 @@ export default function MessageBubble({
       const BG_COLOR = "#0f0f23";
       const TEXT_COLOR = "#e2e8f0";
       const MUTED_COLOR = "#64748b";
-      const CODE_BG = "#1e1e3a";
-      const ACCENT_COLOR = "#818cf8";
+      // Match chat area CodeBlock: --color-code-bg / --color-code-header / --color-border
+      const CODE_BG = "#0d1117";
+      const CODE_HEADER_BG = "#161b22";
+      const CODE_BORDER = "#2a2a4a";
+      const CODE_TEXT_COLOR = "#e2e8f0";
+      const CODE_LANG_COLOR = "#9ca3af";
       const QUESTION_BG = "#1a1a38";
       const QUESTION_COLOR = "#94a3b8";
       const FOOTER_HEIGHT = 96;
+      const CODE_BLOCK_PAD = 16;
+      const CODE_HEADER_H = 32;
+      const CODE_RADIUS = 12;
+      const CODE_LINE_H = 20;
 
       const canvas = document.createElement("canvas");
       const ctx = canvas.getContext("2d")!;
@@ -478,6 +547,25 @@ export default function MessageBubble({
         return result;
       };
 
+      // Preserve leading whitespace + wrap; never splits on spaces within indentation.
+      const wrapCodeLine = (text: string, font: string, maxW: number): string[] => {
+        ctx.font = font;
+        if (!text) return [""];
+        if (ctx.measureText(text).width <= maxW) return [text];
+        const result: string[] = [];
+        let chunk = "";
+        for (const ch of text) {
+          if (ctx.measureText(chunk + ch).width > maxW && chunk) {
+            result.push(chunk);
+            chunk = ch;
+          } else {
+            chunk += ch;
+          }
+        }
+        if (chunk) result.push(chunk);
+        return result;
+      };
+
       // --- Question section ---
       const questionWrapped: { text: string; font: string }[] = [];
       if (questionText) {
@@ -495,15 +583,18 @@ export default function MessageBubble({
 
       // --- Answer section (block-based parser) ---
       const BOLD_FONT = `bold ${FONT_SIZE}px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif`;
-      type LineItem = { text: string; font: string; color: string; isCode?: boolean };
+      type LineItem = { text: string; font: string; color: string };
       type Block =
         | { type: 'lines'; items: LineItem[] }
         | { type: 'hr' }
+        | { type: 'code'; language: string; lines: string[] }
         | { type: 'table'; headers: string[]; rows: string[][] };
 
       const blocks: Block[] = [];
       let currentLines: LineItem[] = [];
       let inCodeBlock = false;
+      let codeLang = "";
+      let codeBuffer: string[] = [];
       let tableHeaders: string[] | null = null;
       let tableRows: string[][] = [];
 
@@ -513,18 +604,34 @@ export default function MessageBubble({
       const flushTable = () => {
         if (tableHeaders) { blocks.push({ type: 'table', headers: tableHeaders, rows: [...tableRows] }); tableHeaders = null; tableRows = []; }
       };
+      const codeInnerW = contentMaxW - CODE_BLOCK_PAD * 2;
+      const flushCode = () => {
+        const wrapped: string[] = [];
+        for (const line of codeBuffer) {
+          for (const wl of wrapCodeLine(line, CODE_FONT, codeInnerW)) wrapped.push(wl);
+        }
+        while (wrapped.length > 0 && !wrapped[0].trim()) wrapped.shift();
+        while (wrapped.length > 0 && !wrapped[wrapped.length - 1].trim()) wrapped.pop();
+        if (wrapped.length > 0) blocks.push({ type: 'code', language: codeLang, lines: wrapped });
+        codeBuffer = [];
+        codeLang = "";
+      };
 
       for (const line of answerText.split("\n")) {
         if (line.startsWith("```")) {
-          if (!inCodeBlock) { flushLines(); flushTable(); }
-          else { blocks.push({ type: 'lines', items: [...currentLines] }); currentLines = []; }
+          if (!inCodeBlock) {
+            flushLines();
+            flushTable();
+            codeLang = line.slice(3).trim();
+            codeBuffer = [];
+          } else {
+            flushCode();
+          }
           inCodeBlock = !inCodeBlock;
           continue;
         }
         if (inCodeBlock) {
-          for (const wl of wrapLines(line, CODE_FONT, contentMaxW)) {
-            currentLines.push({ text: wl, font: CODE_FONT, color: TEXT_COLOR, isCode: true });
-          }
+          codeBuffer.push(line);
           continue;
         }
         if (/^(-{3,}|\*{3,}|_{3,})\s*$/.test(line.trim())) {
@@ -554,6 +661,7 @@ export default function MessageBubble({
         }
       }
       flushLines(); flushTable();
+      if (inCodeBlock && codeBuffer.length > 0) flushCode();
 
       // Trim trailing empty lines
       while (blocks.length > 0) {
@@ -568,11 +676,14 @@ export default function MessageBubble({
       const TABLE_PAD = 8;
       const TABLE_ROW_H = LINE_HEIGHT + 12;
       const calcTableH = (t: { rows: string[][] }) => (1 + t.rows.length) * TABLE_ROW_H + TABLE_PAD * 2;
+      const calcCodeH = (c: { lines: string[] }) =>
+        CODE_HEADER_H + CODE_BLOCK_PAD * 2 + c.lines.length * CODE_LINE_H;
 
       let answerContentHeight = 0;
       for (const block of blocks) {
         if (block.type === 'lines') answerContentHeight += block.items.length * LINE_HEIGHT;
         else if (block.type === 'hr') answerContentHeight += 8;
+        else if (block.type === 'code') answerContentHeight += calcCodeH(block) + 16;
         else if (block.type === 'table') answerContentHeight += calcTableH(block) + 8;
       }
       const totalHeight = PADDING + questionBlockHeight + answerContentHeight + PADDING + FOOTER_HEIGHT;
@@ -627,17 +738,69 @@ export default function MessageBubble({
         }
         if (block.type === 'lines') {
           for (const item of block.items) {
-            if (item.isCode) {
-              ctx.fillStyle = CODE_BG;
-              ctx.fillRect(answerStartX - 8, y - FONT_SIZE, WIDTH - PADDING - answerStartX + 8, LINE_HEIGHT);
-              ctx.fillStyle = ACCENT_COLOR;
-            } else {
-              ctx.fillStyle = item.color;
-            }
+            ctx.fillStyle = item.color;
             ctx.font = item.font;
             ctx.fillText(item.text, answerStartX, y);
             y += LINE_HEIGHT;
           }
+          continue;
+        }
+        if (block.type === 'code') {
+          const boxX = answerStartX - 8;
+          const boxW = WIDTH - PADDING - boxX;
+          const boxH = calcCodeH(block);
+
+          // Container
+          ctx.save();
+          ctx.fillStyle = CODE_BG;
+          ctx.beginPath();
+          ctx.roundRect(boxX, y, boxW, boxH, CODE_RADIUS);
+          ctx.fill();
+          ctx.strokeStyle = CODE_BORDER;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+          ctx.restore();
+
+          // Header
+          ctx.save();
+          ctx.beginPath();
+          ctx.roundRect(boxX, y, boxW, CODE_HEADER_H, [CODE_RADIUS, CODE_RADIUS, 0, 0]);
+          ctx.clip();
+          ctx.fillStyle = CODE_HEADER_BG;
+          ctx.fillRect(boxX, y, boxW, CODE_HEADER_H);
+          ctx.restore();
+
+          // Header bottom border
+          ctx.strokeStyle = CODE_BORDER;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(boxX, y + CODE_HEADER_H);
+          ctx.lineTo(boxX + boxW, y + CODE_HEADER_H);
+          ctx.stroke();
+
+          // Language label + line count
+          ctx.font = "500 12px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+          ctx.fillStyle = CODE_LANG_COLOR;
+          ctx.textBaseline = "middle";
+          const labelY = y + CODE_HEADER_H / 2;
+          const lang = block.language || "text";
+          ctx.fillText(lang, boxX + CODE_BLOCK_PAD, labelY);
+          const langW = ctx.measureText(lang).width;
+          ctx.fillStyle = "#6b7280";
+          ctx.fillText(`${block.lines.length} lines`, boxX + CODE_BLOCK_PAD + langW + 10, labelY);
+          ctx.textBaseline = "alphabetic";
+
+          // Code body
+          ctx.font = CODE_FONT;
+          ctx.fillStyle = CODE_TEXT_COLOR;
+          let cy = y + CODE_HEADER_H + CODE_BLOCK_PAD + 13;
+          const cx = boxX + CODE_BLOCK_PAD;
+          for (const ln of block.lines) {
+            ctx.fillText(ln, cx, cy);
+            cy += CODE_LINE_H;
+          }
+
+          y += boxH + 16;
           continue;
         }
         if (block.type === 'table') {
@@ -878,25 +1041,13 @@ export default function MessageBubble({
             {/* Text file attachment tags */}
             {textAtts.length > 0 && (
               <div className="flex flex-wrap gap-1.5 justify-end">
-                {textAtts.map((att, i) => {
-                  const cat = getFileCategory(att.name);
-                  const style = CATEGORY_STYLE[cat];
-                  const Icon = getCategoryIcon(cat);
-                  const ext = att.name.split(".").pop()?.toLowerCase() || "";
-                  return (
-                    <span
-                      key={i}
-                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border cursor-pointer
-                                   hover:brightness-125 transition-all ${style.bg} ${style.text} ${style.border}`}
-                      onDoubleClick={() => openFile(att.path)}
-                      title={`${att.path || att.name}\nDouble-click to open`}
-                    >
-                      <Icon size={13} />
-                      <span className="text-xs truncate max-w-[140px]">{att.name}</span>
-                      <span className="text-[9px] uppercase font-semibold opacity-60">{ext}</span>
-                    </span>
-                  );
-                })}
+                {textAtts.map((att, i) => (
+                  <TextAttachmentChip
+                    key={i}
+                    att={att}
+                    onOpen={() => openFile(att.path)}
+                  />
+                ))}
               </div>
             )}
             {/* Message text */}

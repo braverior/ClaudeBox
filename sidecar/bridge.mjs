@@ -34,6 +34,8 @@ import { join, extname } from "node:path";
  * Process attachments into prompt text.
  * - Text files → read content, embed as fenced code blocks
  * - Images → include file path so Claude Code uses its Read tool to view them
+ * - Documents (pdf/office) → include path only; let the model use Read or
+ *   document-skills (pdf/pptx/docx/xlsx) to parse them
  * @param {Array<{path: string, name: string, type: string}>} attachments
  * @returns {string} Text to append to the prompt
  */
@@ -46,6 +48,10 @@ function processAttachments(attachments) {
         // Let Claude Code's Read tool handle image files — it supports
         // reading images (PNG, JPG, etc.) and presenting them visually.
         parts.push(`[Attached image: ${att.path}]`);
+      } else if (att.type === "document") {
+        // Binary document (PDF/PPTX/DOCX/XLSX/…) — reading as UTF-8 would
+        // produce garbage. Hand off to Read tool or document-skills.
+        parts.push(`[Attached document: ${att.path}]`);
       } else {
         // Text / code file — read and embed inline
         const content = readFileSync(att.path, "utf-8");

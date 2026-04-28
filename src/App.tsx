@@ -318,11 +318,13 @@ export default function App() {
       // Sync completion to Lark bot sidecar (for all sessions, not just Lark-initiated)
       const larkStatus = useLarkStore.getState().status;
       if (larkStatus === "connected") {
+        const execForChat = useLarkStore.getState().getLarkExecution(payload.session_id);
         larkSendCommand(JSON.stringify({
           type: "app_activity",
           session_id: payload.session_id,
           status: payload.error ? "error" : "completed",
           last_message: lastMessage,
+          chat_id: execForChat?.chatId,
         })).catch(() => {});
       }
 

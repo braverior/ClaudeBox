@@ -27,7 +27,7 @@
 
 import * as lark from "@larksuiteoapi/node-sdk";
 import { createInterface } from "node:readline";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
@@ -53,9 +53,97 @@ let taskIdCounter = 0;
 /** App-initiated sessions tracked for Lark visibility: sessionId → { sessionId, projectPath, prompt, status, startedAt } */
 let appActivities = [];
 
-/** @type {Map<string, { turns: Array<{role:string,content:string}>, lastActivity: number }>} chatId → conversation state */
+/**
+ * Per-chat persistent memory.
+ *
+ * @typedef {{
+ *   turns: Array<{ role: string, content: any }>,
+ *   messageLog: Array<{ ts: number, dir: "in"|"out", text: string, messageId?: string }>,
+ *   executions: Array<{ ts: number, sessionId?: string, project?: string, prompt?: string, status: string, summary?: string, output?: string }>,
+ *   defaultProject?: string,
+ *   senderName?: string,
+ *   lastActivity: number,
+ * }} ChatState
+ *
+ * @type {Map<string, ChatState>}
+ */
 const conversationState = new Map();
-const CONVERSATION_EXPIRE_MS = 10 * 60 * 1000; // 10 minutes
+const CONVERSATION_EXPIRE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const MAX_TURNS = 24;        // ~12 exchanges (incl tool_use/tool_result)
+const MAX_MSG_LOG = 40;
+const MAX_EXECUTIONS = 20;
+const MAX_TOOL_LOOPS = 6;
+
+/** Map session_id → chat_id, for routing execution completion back to memory. */
+const sessionChatMap = new Map();
+
+// Persistent memory file
+const MEMORY_DIR = join(homedir(), ".claudebox", "data");
+const MEMORY_PATH = join(MEMORY_DIR, "lark-memory.json");
+
+function loadMemory() {
+  try {
+    if (!existsSync(MEMORY_PATH)) return;
+    const raw = JSON.parse(readFileSync(MEMORY_PATH, "utf-8"));
+    let loaded = 0;
+    for (const [chatId, state] of Object.entries(raw)) {
+      if (!state || typeof state !== "object") continue;
+      if (Date.now() - (state.lastActivity || 0) > CONVERSATION_EXPIRE_MS) continue;
+      conversationState.set(chatId, {
+        turns: Array.isArray(state.turns) ? state.turns : [],
+        messageLog: Array.isArray(state.messageLog) ? state.messageLog : [],
+        executions: Array.isArray(state.executions) ? state.executions : [],
+        defaultProject: state.defaultProject || undefined,
+        senderName: state.senderName || undefined,
+        lastActivity: state.lastActivity || Date.now(),
+      });
+      loaded++;
+    }
+    console.error(`[lark-bot] Loaded memory for ${loaded} chats`);
+  } catch (e) {
+    console.error(`[lark-bot] loadMemory failed: ${e.message}`);
+  }
+}
+
+let saveTimer = null;
+function saveMemoryDebounced() {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    try {
+      mkdirSync(MEMORY_DIR, { recursive: true });
+      const obj = Object.fromEntries(conversationState);
+      writeFileSync(MEMORY_PATH, JSON.stringify(obj, null, 2));
+    } catch (e) {
+      console.error(`[lark-bot] saveMemory failed: ${e.message}`);
+    }
+  }, 500);
+}
+
+function getOrInitChatState(chatId) {
+  let state = conversationState.get(chatId);
+  if (!state) {
+    state = {
+      turns: [],
+      messageLog: [],
+      executions: [],
+      lastActivity: Date.now(),
+    };
+    conversationState.set(chatId, state);
+  }
+  // Expire stale turns (keep executions / defaultProject longer)
+  if (Date.now() - state.lastActivity > CONVERSATION_EXPIRE_MS) {
+    state.turns = [];
+  }
+  return state;
+}
+
+function pushMessageLog(state, dir, text, messageId) {
+  state.messageLog.push({ ts: Date.now(), dir, text: (text || "").slice(0, 2000), messageId });
+  if (state.messageLog.length > MAX_MSG_LOG) {
+    state.messageLog = state.messageLog.slice(-MAX_MSG_LOG);
+  }
+}
 
 /** Dedup: recently processed message IDs (Lark WebSocket may redeliver on reconnect) */
 const processedMessages = new Set();
@@ -300,6 +388,29 @@ function parseCommand(text) {
     return { isCommand: true, response: buildProjectSummary(), cardTitle: "📂 项目列表", cardType: "blue" };
   }
 
+  // /use <项目> — 设置当前聊天默认项目
+  const useMatch = trimmed.match(/^\/use\s+(.+)$/);
+  if (useMatch) {
+    return {
+      isCommand: true,
+      cardTitle: "✅ 默认项目已设置",
+      cardType: "green",
+      response: "",
+      setDefaultProject: useMatch[1].trim(),
+    };
+  }
+
+  // /忘记 /reset /forget — 清空当前聊天记忆
+  if (trimmed === "/忘记" || trimmed === "/reset" || trimmed === "/forget") {
+    return {
+      isCommand: true,
+      cardTitle: "🧹 已清空记忆",
+      cardType: "orange",
+      response: "该聊天的对话历史、默认项目、执行记录已全部清空。",
+      clearMemory: true,
+    };
+  }
+
   // /help
   if (trimmed === "/help" || trimmed === "帮助") {
     return {
@@ -307,8 +418,8 @@ function parseCommand(text) {
       cardTitle: "📖 使用帮助",
       cardType: "blue",
       response: [
-        "直接发送消息，AI 会理解你的意图并在 ClaudeBox 中执行。",
-        "例如：「帮我在 ClaudeBox 项目里修复登录 bug」",
+        "直接发送消息，助理会调用工具理解并完成任务。",
+        "例如：「dmads 项目帮我验证聚合 SDK 竞价只会返回一个广告对象」",
         "",
         "**快捷指令：**",
         "• `/projects` — 查看所有项目",
@@ -316,6 +427,8 @@ function parseCommand(text) {
         "• `/task <项目名> <开发内容>` — 创建开发任务",
         "• `/start <任务ID>` — 开始任务",
         "• `/done <任务ID>` — 完成任务",
+        "• `/use <项目>` — 设置当前聊天默认项目",
+        "• `/忘记` — 清空本聊天的记忆",
         "• `/help` — 显示此帮助",
       ].join("\n"),
     };
@@ -324,71 +437,394 @@ function parseCommand(text) {
   return { isCommand: false };
 }
 
-// ── AI Intent Parsing ──────────────────────────────────────────────
+// ── Tool Definitions ───────────────────────────────────────────────
 
-/**
- * Lightweight intent parsing using Anthropic Messages API.
- * Understands user intent and decides: execute in app, ask clarification, or reply directly.
- * Maintains multi-turn conversation state per chatId for follow-up questions.
- *
- * @param {string} userText - The user's message text
- * @param {string} chatId - Lark chat ID (used as conversation key)
- * @returns {Promise<{action: "execute"|"clarify"|"info", project: string, prompt: string, confidence: number, clarification: string, summary: string}>}
- */
-async function parseIntent(userText, chatId) {
-  // Get or create conversation state for this chat
-  let state = conversationState.get(chatId) || { turns: [], lastActivity: 0 };
+/** Resolve a project name/path fragment to a full path via sessions. */
+function resolveProjectPath(query) {
+  if (!query) return { path: "", name: "" };
+  const q = query.trim().toLowerCase();
+  const storedSessions = sessions.length > 0 ? sessions : readStoredSessions();
 
-  // Expire stale conversations
-  if (Date.now() - state.lastActivity > CONVERSATION_EXPIRE_MS) {
-    state = { turns: [], lastActivity: 0 };
+  // Exact path match first
+  for (const s of storedSessions) {
+    const path = s.projectPath || s.cwd || "";
+    if (path.toLowerCase() === q) {
+      return { path, name: s.projectName || s.name || path.split("/").pop() || "" };
+    }
   }
-
-  const projectSummary = buildProjectSummary();
-  const taskSummary = formatTaskList();
-
-  const systemPrompt = `You are a routing assistant for ClaudeBox (a Claude Code desktop app).
-Your job: understand what the user wants to do and extract structured intent.
-
-Available projects:
-${projectSummary}
-
-Current tasks:
-${taskSummary}
-
-You MUST respond with a JSON object ONLY (no markdown, no code fences, no extra text):
-{
-  "action": "execute" | "clarify" | "info",
-  "project": "<full project path, or empty string>",
-  "prompt": "<the refined prompt for Claude Code, or direct answer for info>",
-  "confidence": 0.0-1.0,
-  "clarification": "<question to ask user if action=clarify, otherwise empty string>",
-  "summary": "<one-line Chinese summary of what will be done>"
+  // Name match
+  for (const s of storedSessions) {
+    const name = (s.projectName || s.name || "").toLowerCase();
+    if (name && (name === q || name.includes(q) || q.includes(name))) {
+      const path = s.projectPath || s.cwd || "";
+      return { path, name: s.projectName || s.name || path.split("/").pop() || "" };
+    }
+  }
+  // Path fragment match
+  for (const s of storedSessions) {
+    const path = (s.projectPath || s.cwd || "").toLowerCase();
+    if (path && (path.endsWith(`/${q}`) || path.includes(`/${q}/`))) {
+      const full = s.projectPath || s.cwd || "";
+      return { path: full, name: s.projectName || s.name || full.split("/").pop() || "" };
+    }
+  }
+  // Fallback: treat the query as a raw path if it looks absolute
+  if (query.startsWith("/") || /^[A-Za-z]:[\\/]/.test(query)) {
+    return { path: query, name: query.split(/[\\/]/).pop() || query };
+  }
+  return { path: "", name: query };
 }
 
-Rules:
-- "execute": User's intent is clear — we know which project and what to do. confidence >= 0.7
-- "clarify": Intent is ambiguous (no project, vague request). Ask ONE focused question in Chinese.
-- "info": User is asking a question that doesn't need code execution (e.g. "我有哪些项目"). Put the answer in "prompt".
-- For "execute", ALWAYS include the full project path in "project"
-- The "prompt" should be a clear, detailed instruction suitable for Claude Code
-- If user mentions a project by name, resolve it to the full path from the projects list
-- If there's only one project, assume that's the target unless stated otherwise
-- Always respond in Chinese for summary and clarification`;
-
-  const messages = [
-    ...state.turns,
-    { role: "user", content: userText },
-  ];
-
-  const apiKey = config.api_key || process.env.ANTHROPIC_API_KEY;
-  const baseUrl = (config.base_url || process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com").replace(/\/+$/, "");
-
-  if (!apiKey) {
-    throw new Error("未配置 API Key，请在 ClaudeBox 设置中配置。");
+function listProjectsTool() {
+  const storedSessions = sessions.length > 0 ? sessions : readStoredSessions();
+  const map = new Map();
+  for (const s of storedSessions) {
+    const path = s.projectPath || s.cwd || "unknown";
+    const name = s.projectName || s.name || path.split("/").pop() || path;
+    if (!map.has(path)) map.set(path, { name, path, sessions: 0, lastActivity: 0 });
+    const p = map.get(path);
+    p.sessions++;
+    const t = s.updatedAt || 0;
+    if (t > p.lastActivity) p.lastActivity = t;
   }
+  return Array.from(map.values())
+    .sort((a, b) => b.lastActivity - a.lastActivity)
+    .map((p) => ({
+      name: p.name,
+      path: p.path,
+      sessionCount: p.sessions,
+      lastActivityIso: p.lastActivity ? new Date(p.lastActivity).toISOString() : null,
+    }));
+}
 
-  const response = await fetch(`${baseUrl}/v1/messages`, {
+function viewProjectTool(query) {
+  const resolved = resolveProjectPath(query);
+  if (!resolved.path) {
+    return { found: false, message: `未找到项目 "${query}"` };
+  }
+  const storedSessions = sessions.length > 0 ? sessions : readStoredSessions();
+  const related = storedSessions
+    .filter((s) => (s.projectPath || s.cwd) === resolved.path)
+    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+    .slice(0, 5)
+    .map((s) => ({
+      sessionId: s.id,
+      title: s.title || s.name || "(未命名会话)",
+      updatedIso: s.updatedAt ? new Date(s.updatedAt).toISOString() : null,
+    }));
+  return {
+    found: true,
+    name: resolved.name,
+    path: resolved.path,
+    recentSessions: related,
+  };
+}
+
+function listTasksTool() {
+  const tasks = devTasks.map((t) => ({
+    id: t.id,
+    project: t.projectName,
+    projectPath: t.projectPath || "",
+    description: t.description,
+    status: t.status,
+    createdIso: new Date(t.createdAt).toISOString(),
+  }));
+  const activities = appActivities.map((a) => ({
+    sessionId: a.sessionId,
+    project: (a.projectPath || "").split("/").pop() || "unknown",
+    projectPath: a.projectPath || "",
+    prompt: a.prompt,
+    status: a.status,
+    lastMessage: a.lastMessage || "",
+    startedIso: new Date(a.startedAt).toISOString(),
+  }));
+  return { tasks, activeRuns: activities };
+}
+
+function viewTaskTool(taskId) {
+  const t = devTasks.find((x) => x.id === taskId);
+  if (t) {
+    return {
+      found: true,
+      id: t.id,
+      project: t.projectName,
+      projectPath: t.projectPath || "",
+      description: t.description,
+      status: t.status,
+      createdIso: new Date(t.createdAt).toISOString(),
+      updatedIso: new Date(t.updatedAt).toISOString(),
+    };
+  }
+  const a = appActivities.find((x) => x.sessionId === taskId);
+  if (a) {
+    return {
+      found: true,
+      kind: "activeRun",
+      sessionId: a.sessionId,
+      project: (a.projectPath || "").split("/").pop() || "unknown",
+      prompt: a.prompt,
+      status: a.status,
+      lastMessage: a.lastMessage || "",
+      startedIso: new Date(a.startedAt).toISOString(),
+    };
+  }
+  return { found: false, message: `未找到任务 ${taskId}` };
+}
+
+/**
+ * Create a task in the indicated project and emit lark_execute so the frontend
+ * actually runs it through Claude Code.
+ */
+function createTaskTool({ project, description, chatId, messageId }) {
+  const resolved = resolveProjectPath(project);
+  if (!resolved.path) {
+    return { ok: false, message: `无法定位项目 "${project}"，请先用 list_projects 确认` };
+  }
+  const task = createTask(resolved.path, resolved.name, description);
+  emit({ type: "task_created", task });
+
+  const execMsgId = `${messageId || `chat-${chatId}`}-t${task.id}`;
+  emit({
+    type: "lark_execute",
+    message_id: execMsgId,
+    chat_id: chatId,
+    prompt: description,
+    project_path: resolved.path,
+    summary: `${resolved.name}: ${description.slice(0, 40)}`,
+  });
+
+  return {
+    ok: true,
+    taskId: task.id,
+    project: resolved.name,
+    projectPath: resolved.path,
+    description,
+    status: task.status,
+    note: "任务已创建并提交 ClaudeBox 执行；执行结束后结果会进入 executions 记忆。",
+  };
+}
+
+function updateTaskTool({ task_id, status }) {
+  const task = updateTask(task_id, status);
+  if (!task) return { ok: false, message: `未找到任务 ${task_id}` };
+  emit({ type: "task_updated", task_id: task.id, status: task.status });
+  return { ok: true, taskId: task.id, status: task.status };
+}
+
+function recallMemoryTool({ state, limit = 5 }) {
+  const execs = state.executions.slice(-limit).map((e) => ({
+    ts: new Date(e.ts).toISOString(),
+    project: e.project || "",
+    prompt: e.prompt || "",
+    status: e.status,
+    summary: e.summary || "",
+  }));
+  const msgs = state.messageLog.slice(-limit).map((m) => ({
+    ts: new Date(m.ts).toISOString(),
+    dir: m.dir,
+    text: m.text,
+  }));
+  return {
+    defaultProject: state.defaultProject || null,
+    recentExecutions: execs,
+    recentMessages: msgs,
+  };
+}
+
+const TOOL_DEFS = [
+  {
+    name: "list_projects",
+    description: "列出 ClaudeBox 记录过的所有项目（按最近活跃排序）。当用户问'我有哪些项目'或需要选项目时使用。",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "view_project",
+    description: "查看某个项目的详细信息（路径、最近会话等）。支持按项目名、路径片段模糊匹配。",
+    input_schema: {
+      type: "object",
+      properties: { query: { type: "string", description: "项目名称或路径片段" } },
+      required: ["query"],
+    },
+  },
+  {
+    name: "list_tasks",
+    description: "列出所有开发任务和正在运行的执行。",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "view_task",
+    description: "查看某个任务或活跃会话的详情。",
+    input_schema: {
+      type: "object",
+      properties: { task_id: { type: "string", description: "任务 ID 或 session_id" } },
+      required: ["task_id"],
+    },
+  },
+  {
+    name: "create_task",
+    description:
+      "在指定项目中创建开发任务并立即交给 ClaudeBox 执行。用户描述任何具体技术动作（修 bug、实现功能、验证逻辑、分析代码、对齐接口等）都应使用此工具——不要再追问'请更具体'。调用后 ClaudeBox 会启动 Claude Code 会话去实际完成，执行结果会异步回流到记忆。",
+    input_schema: {
+      type: "object",
+      properties: {
+        project: { type: "string", description: "项目名或路径（模糊匹配）；若未指定且存在 defaultProject，使用它" },
+        description: {
+          type: "string",
+          description: "详尽的任务描述——尽量保留用户原话里的技术细节（涉及的模块/接口/期望结论）。这会作为 prompt 直接喂给 Claude Code。",
+        },
+      },
+      required: ["project", "description"],
+    },
+  },
+  {
+    name: "update_task",
+    description: "更新任务状态（pending / in_progress / done）。",
+    input_schema: {
+      type: "object",
+      properties: {
+        task_id: { type: "string" },
+        status: { type: "string", enum: ["pending", "in_progress", "done"] },
+      },
+      required: ["task_id", "status"],
+    },
+  },
+  {
+    name: "set_default_project",
+    description: "把当前聊天的默认项目设为指定项目，后续用户不再显式说项目时默认使用它。",
+    input_schema: {
+      type: "object",
+      properties: { project: { type: "string", description: "项目名或路径" } },
+      required: ["project"],
+    },
+  },
+  {
+    name: "recall_memory",
+    description: "读取当前聊天的历史执行记录与最近消息，用于追溯之前做过的事。",
+    input_schema: {
+      type: "object",
+      properties: { limit: { type: "integer", description: "返回的条目上限，默认 5" } },
+      required: [],
+    },
+  },
+];
+
+async function dispatchTool(name, input, ctx) {
+  try {
+    switch (name) {
+      case "list_projects":
+        return listProjectsTool();
+      case "view_project":
+        return viewProjectTool(input.query || "");
+      case "list_tasks":
+        return listTasksTool();
+      case "view_task":
+        return viewTaskTool(input.task_id || "");
+      case "create_task": {
+        const project = input.project || ctx.state.defaultProject || "";
+        if (!project) return { ok: false, message: "尚无默认项目，请让用户指定 project" };
+        const result = createTaskTool({
+          project,
+          description: input.description || "",
+          chatId: ctx.chatId,
+          messageId: ctx.messageId,
+        });
+        if (result.ok && result.projectPath) {
+          ctx.state.defaultProject = result.projectPath;
+          ctx.state.executions.push({
+            ts: Date.now(),
+            sessionId: undefined,
+            project: result.project,
+            prompt: input.description || "",
+            status: "dispatched",
+            summary: `已提交执行：${result.project}`,
+          });
+          if (ctx.state.executions.length > MAX_EXECUTIONS) {
+            ctx.state.executions = ctx.state.executions.slice(-MAX_EXECUTIONS);
+          }
+        }
+        return result;
+      }
+      case "update_task":
+        return updateTaskTool(input);
+      case "set_default_project": {
+        const resolved = resolveProjectPath(input.project || "");
+        if (!resolved.path) return { ok: false, message: `无法定位项目 "${input.project}"` };
+        ctx.state.defaultProject = resolved.path;
+        saveMemoryDebounced();
+        return { ok: true, defaultProject: resolved.path, name: resolved.name };
+      }
+      case "recall_memory":
+        return recallMemoryTool({ state: ctx.state, limit: input.limit || 5 });
+      default:
+        return { error: `unknown tool: ${name}` };
+    }
+  } catch (e) {
+    return { error: String(e?.message || e) };
+  }
+}
+
+// ── Anthropic Messages API (tool-use agent) ────────────────────────
+
+function getRouterModel() {
+  // Prefer the model configured by ClaudeBox. Fall back to sonnet-4-6;
+  // never downgrade to haiku here because tool-calling on small models is brittle.
+  const m = (config?.model || "").trim();
+  if (m) return m;
+  return "claude-sonnet-4-6";
+}
+
+function buildAgentSystemPrompt(state) {
+  const projectList = listProjectsTool();
+  const projectsBrief = projectList.length
+    ? projectList
+        .slice(0, 10)
+        .map((p) => `  - ${p.name} (${p.path}) · ${p.sessionCount} 会话`)
+        .join("\n")
+    : "  （暂无记录的项目）";
+
+  const defaultProjectLine = state.defaultProject
+    ? `\n【默认项目】${state.defaultProject}（用户未指定其他项目时一律使用它）`
+    : "\n【默认项目】尚未设置——如果用户在消息里明确提到某个项目名，请用 set_default_project 记住它。";
+
+  const recentExecs = state.executions.slice(-3);
+  const execsLine = recentExecs.length
+    ? "\n【最近执行记录】\n" +
+      recentExecs
+        .map(
+          (e) =>
+            `  - [${new Date(e.ts).toLocaleString("zh-CN")}] ${e.project || ""} · ${e.status}${e.summary ? " · " + e.summary : ""}`,
+        )
+        .join("\n")
+    : "";
+
+  const senderLine = state.senderName ? `\n【用户】${state.senderName}` : "";
+
+  return `你是 ClaudeBox 的飞书助理，帮助研发/产品跟进项目和任务。你有一组工具可以实际做事。
+
+【可用项目】
+${projectsBrief}
+${defaultProjectLine}${execsLine}${senderLine}
+
+【行为铁律】
+1. 用户描述任何具体技术动作——修 bug、实现功能、改代码、分析、验证逻辑、对齐接口、写脚本、排查问题——直接调用 create_task，**不要**追问"请更具体地描述你的需求"。
+2. 描述超过 20 字且含技术关键词（代码、接口、SDK、验证、bug、模块、字段、逻辑、渠道、竞价...）即视为具体需求，可以直接 create_task。
+3. 只有当完全无法判断用户要做什么时，才用自然语言询问澄清。
+4. 用户若问信息（"我有哪些项目"、"最近在做什么"），调用 list_projects / list_tasks / recall_memory 获取后用自然语言答复。
+5. 所有面向用户的回复用中文，简洁、直接、不要啰嗦。
+6. 不要暴露内部 ID（如路径全串）给用户，除非必要；但工具调用的 input 要用完整字段。
+7. 同一轮允许调用多个工具。完成后直接给用户一段 Markdown 回复即可。`;
+}
+
+function antropicEndpoint() {
+  const baseUrl = (config?.base_url || process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com").replace(/\/+$/, "");
+  return `${baseUrl}/v1/messages`;
+}
+
+async function callModel(messages, system) {
+  const apiKey = config?.api_key || process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error("未配置 API Key，请在 ClaudeBox 设置中配置。");
+
+  const resp = await fetch(antropicEndpoint(), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -396,44 +832,96 @@ Rules:
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 512,
-      system: systemPrompt,
+      model: getRouterModel(),
+      max_tokens: 2048,
+      system,
+      tools: TOOL_DEFS,
       messages,
     }),
   });
 
-  if (!response.ok) {
-    const errText = await response.text().catch(() => "");
-    throw new Error(`API request failed (${response.status}): ${errText}`);
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => "");
+    throw new Error(`API request failed (${resp.status}): ${errText}`);
   }
+  return resp.json();
+}
 
-  const result = await response.json();
-  const assistantText = result.content?.[0]?.text || "{}";
-
-  let intent;
-  try {
-    // Handle possible markdown code fences
-    const cleaned = assistantText.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "").trim();
-    intent = JSON.parse(cleaned);
-  } catch {
-    // Fallback: ask for clarification
-    intent = { action: "clarify", project: "", prompt: "", confidence: 0, clarification: "请更具体地描述你的需求。", summary: "" };
-  }
-
-  // Update conversation state
-  state.turns.push({ role: "user", content: userText });
-  state.turns.push({ role: "assistant", content: assistantText });
+/**
+ * Run the tool-use loop. Mutates state.turns with the exchange.
+ * Returns the final assistant text to send to the user (may be empty).
+ */
+async function agenticReply(userText, chatId, messageId, senderName) {
+  const state = getOrInitChatState(chatId);
+  if (senderName && !state.senderName) state.senderName = senderName;
   state.lastActivity = Date.now();
 
-  // Keep only last 6 turns (3 exchanges)
-  if (state.turns.length > 6) {
-    state.turns = state.turns.slice(-6);
+  // Push the new user turn
+  state.turns.push({ role: "user", content: userText });
+
+  for (let loop = 0; loop < MAX_TOOL_LOOPS; loop++) {
+    const system = buildAgentSystemPrompt(state);
+    const resp = await callModel(state.turns, system);
+    const blocks = Array.isArray(resp.content) ? resp.content : [];
+
+    // Add the assistant turn to transcript verbatim (preserves tool_use ids)
+    state.turns.push({ role: "assistant", content: blocks });
+
+    const toolUses = blocks.filter((b) => b.type === "tool_use");
+    if (toolUses.length === 0) {
+      const finalText = blocks.filter((b) => b.type === "text").map((b) => b.text || "").join("\n").trim();
+      trimTurns(state);
+      saveMemoryDebounced();
+      return finalText;
+    }
+
+    // Execute each tool call
+    const toolResults = [];
+    for (const tu of toolUses) {
+      const result = await dispatchTool(tu.name, tu.input || {}, {
+        chatId,
+        messageId,
+        state,
+      });
+      toolResults.push({
+        type: "tool_result",
+        tool_use_id: tu.id,
+        content: JSON.stringify(result),
+      });
+    }
+    state.turns.push({ role: "user", content: toolResults });
   }
 
-  conversationState.set(chatId, state);
+  trimTurns(state);
+  saveMemoryDebounced();
+  return "（工具调用超出循环上限，请重新描述需求。）";
+}
 
-  return intent;
+function trimTurns(state) {
+  if (state.turns.length <= MAX_TURNS) return;
+  // Keep the most recent window but don't dangle a tool_result without its tool_use
+  let start = state.turns.length - MAX_TURNS;
+  while (start > 0) {
+    const turn = state.turns[start];
+    const prev = state.turns[start - 1];
+    // Avoid starting at a tool_result (orphaned)
+    if (
+      turn.role === "user" &&
+      Array.isArray(turn.content) &&
+      turn.content.some((b) => b && b.type === "tool_result")
+    ) {
+      start++;
+      if (start >= state.turns.length) break;
+      continue;
+    }
+    // Avoid starting right after an assistant that emits tool_use without the result
+    if (prev && prev.role === "assistant" && Array.isArray(prev.content) && prev.content.some((b) => b && b.type === "tool_use")) {
+      start++;
+      continue;
+    }
+    break;
+  }
+  state.turns = state.turns.slice(start);
 }
 
 // ── Lark Message Handler ──────────────────────────────────────────
@@ -445,6 +933,7 @@ async function handleLarkMessage(data) {
   const chatId = data.message.chat_id;
   const chatType = data.message.chat_type;
   const senderId = data.sender?.sender_id?.open_id || "unknown";
+  const senderName = data.sender?.sender_id?.user_id || data.sender?.sender_id?.union_id || undefined;
 
   // Dedup: skip if already processed (Lark WebSocket may redeliver)
   if (processedMessages.has(messageId)) {
@@ -462,6 +951,11 @@ async function handleLarkMessage(data) {
     for (const v of keep) processedMessages.add(v);
   }
 
+  // Log to chat memory
+  const chatState = getOrInitChatState(chatId);
+  pushMessageLog(chatState, "in", text, messageId);
+  saveMemoryDebounced();
+
   // Emit raw message to frontend
   emit({
     type: "lark_message",
@@ -473,9 +967,27 @@ async function handleLarkMessage(data) {
     timestamp: Date.now(),
   });
 
-  // 1. Check commands first (shortcuts kept)
+  // 1. Check built-in commands first (kept for power users)
   const cmd = parseCommand(text);
   if (cmd.isCommand) {
+    // Apply memory side-effects
+    if (cmd.setDefaultProject) {
+      const resolved = resolveProjectPath(cmd.setDefaultProject);
+      const st = getOrInitChatState(chatId);
+      if (resolved.path) {
+        st.defaultProject = resolved.path;
+        cmd.response = `后续对话默认使用项目：**${resolved.name}**\n\`${resolved.path}\`\n\n发 \`/忘记\` 可清空。`;
+      } else {
+        st.defaultProject = cmd.setDefaultProject;
+        cmd.response = `后续对话默认使用：\`${cmd.setDefaultProject}\`（未在已知项目中找到同名项，已原样记住）`;
+      }
+      saveMemoryDebounced();
+    }
+    if (cmd.clearMemory) {
+      conversationState.delete(chatId);
+      saveMemoryDebounced();
+    }
+
     try {
       const card = buildNotificationCard(
         cmd.cardTitle || "ClaudeBox",
@@ -489,6 +1001,8 @@ async function handleLarkMessage(data) {
           msg_type: "interactive",
         },
       });
+      pushMessageLog(getOrInitChatState(chatId), "out", cmd.response);
+      saveMemoryDebounced();
       emit({ type: "ai_reply", message_id: messageId, reply: cmd.response });
     } catch (err) {
       emitError(`Failed to reply command: ${err.message}`);
@@ -507,77 +1021,33 @@ async function handleLarkMessage(data) {
     return;
   }
 
-  // 2. Parse intent using lightweight AI
+  // 2. Hand off to tool-using agent
   try {
-    const intent = await parseIntent(text, chatId);
+    const reply = await agenticReply(text, chatId, messageId, senderName);
 
-    if (intent.action === "execute" && intent.confidence >= 0.7) {
-      // Confident — tell user we're starting, then emit to frontend for execution
-      const confirmMsg = `${intent.summary}\n正在 ClaudeBox 中执行...`;
-      try {
-        await client.im.message.reply({
-          path: { message_id: messageId },
-          data: {
-            content: JSON.stringify({ text: confirmMsg }),
-            msg_type: "text",
-          },
-        });
-      } catch { /* non-critical */ }
-
-      emit({
-        type: "lark_execute",
-        message_id: messageId,
-        chat_id: chatId,
-        prompt: intent.prompt,
-        project_path: intent.project,
-        summary: intent.summary,
+    const finalReply = (reply || "").trim() || "（已处理。）";
+    try {
+      const card = buildNotificationCard("ClaudeBox 助理", finalReply, "blue");
+      await client.im.message.reply({
+        path: { message_id: messageId },
+        data: {
+          content: JSON.stringify(card),
+          msg_type: "interactive",
+        },
       });
-
-      // Clear conversation state — intent resolved
-      conversationState.delete(chatId);
-
-    } else if (intent.action === "clarify") {
-      // Ask clarification in Lark
-      try {
-        await client.im.message.reply({
-          path: { message_id: messageId },
-          data: {
-            content: JSON.stringify({ text: intent.clarification }),
-            msg_type: "text",
-          },
-        });
-      } catch (err) {
-        emitError(`Failed to reply clarification: ${err.message}`);
-      }
-
-    } else if (intent.action === "info") {
-      // Direct info response — use card for rich formatting
-      const reply = intent.prompt || "暂无相关信息。";
-      try {
-        const card = buildNotificationCard(
-          intent.summary || "ClaudeBox",
-          reply,
-          "blue",
-        );
-        await client.im.message.reply({
-          path: { message_id: messageId },
-          data: {
-            content: JSON.stringify(card),
-            msg_type: "interactive",
-          },
-        });
-        emit({ type: "ai_reply", message_id: messageId, reply });
-      } catch (err) {
-        emitError(`Failed to reply info: ${err.message}`);
-      }
+      pushMessageLog(getOrInitChatState(chatId), "out", finalReply, messageId);
+      saveMemoryDebounced();
+      emit({ type: "ai_reply", message_id: messageId, reply: finalReply });
+    } catch (err) {
+      emitError(`Failed to reply: ${err.message}`);
     }
   } catch (err) {
-    emitError(`Intent parsing failed: ${err.message}`);
+    emitError(`Agent reply failed: ${err.message}`);
     try {
       await client.im.message.reply({
         path: { message_id: messageId },
         data: {
-          content: JSON.stringify({ text: `[解析失败] ${err.message}` }),
+          content: JSON.stringify({ text: `[助理异常] ${err.message}` }),
           msg_type: "text",
         },
       });
@@ -645,10 +1115,38 @@ rl.on("line", (line) => {
               startedAt: Date.now(),
             });
           }
+          if (msg.chat_id) sessionChatMap.set(msg.session_id, msg.chat_id);
         } else if (idx !== -1) {
           appActivities[idx].status = msg.status;
           if (msg.last_message) appActivities[idx].lastMessage = msg.last_message;
         }
+
+        // Persist terminal outcomes into the originating chat's memory
+        if (msg.status === "completed" || msg.status === "error") {
+          const chatId = msg.chat_id || sessionChatMap.get(msg.session_id);
+          if (chatId) {
+            const st = conversationState.get(chatId);
+            if (st) {
+              const activity = idx !== -1 ? appActivities[idx] : null;
+              st.executions.push({
+                ts: Date.now(),
+                sessionId: msg.session_id,
+                project: activity?.projectPath || msg.project_path || undefined,
+                prompt: activity?.prompt || "",
+                status: msg.status,
+                summary: activity ? `${(activity.projectPath || "").split("/").pop()}: ${(activity.prompt || "").slice(0, 60)}` : "",
+                output: (msg.last_message || "").slice(0, 2000),
+              });
+              if (st.executions.length > MAX_EXECUTIONS) {
+                st.executions = st.executions.slice(-MAX_EXECUTIONS);
+              }
+              st.lastActivity = Date.now();
+              saveMemoryDebounced();
+            }
+          }
+          sessionChatMap.delete(msg.session_id);
+        }
+
         // Prune completed activities older than 30 minutes
         const cutoff = Date.now() - 30 * 60 * 1000;
         appActivities = appActivities.filter(
@@ -679,6 +1177,7 @@ rl.on("close", () => {
 // ── Main ────────────────────────────────────────────────────────────
 
 async function main() {
+  loadMemory();
   console.error("[lark-bot] Waiting for start command...");
 
   // Wait for the "start" message from Rust

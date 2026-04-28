@@ -61,6 +61,7 @@ pub fn run() {
             claude::read_image_base64,
             claude::save_clipboard_image,
             claude::copy_image_to_clipboard,
+            claude::get_file_size,
             claude::get_context_tokens,
             claude::get_node_installer_url,
             claude::download_and_open_node_installer,

@@ -44,6 +44,18 @@ export function formatDuration(ms: number): string {
   return `${hours}h ${remainMin}m`;
 }
 
+/** Format bytes as a human-readable size (e.g. 1.2 KB, 3.4 MB). */
+export function formatFileSize(bytes?: number): string {
+  if (bytes == null || !isFinite(bytes) || bytes < 0) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb < 10 ? kb.toFixed(1) : Math.round(kb)} KB`;
+  const mb = kb / 1024;
+  if (mb < 1024) return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`;
+  const gb = mb / 1024;
+  return `${gb < 10 ? gb.toFixed(2) : gb.toFixed(1)} GB`;
+}
+
 /** Format relative date */
 export function formatRelativeDate(ts: number): string {
   const now = Date.now();

@@ -112,6 +112,8 @@ Download the latest release from [GitHub Releases](https://github.com/braverior/
 | macOS (Intel) | `ClaudeBox_x.x.x_x64.dmg` |
 | Windows | `ClaudeBox_x.x.x_x64-setup.exe` |
 
+> **System requirements**: macOS 13 Ventura or later / Windows 10 1803+. Older macOS versions (Big Sur / Monterey) ship a WebKit that's too old — the UI will render unstyled.
+
 ### Prerequisites
 
 - **Node.js** >= 18 (required to run the sidecar bridge)

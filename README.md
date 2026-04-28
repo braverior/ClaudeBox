@@ -112,6 +112,8 @@ brew install --cask claudebox
 | macOS (Intel) | `ClaudeBox_x.x.x_x64.dmg` |
 | Windows | `ClaudeBox_x.x.x_x64-setup.exe` |
 
+> **系统要求**：macOS 13 Ventura 及以上 / Windows 10 1803+。低版本 macOS（Big Sur / Monterey）由于系统自带 WebKit 过旧，样式会无法渲染。
+
 ### 前置依赖
 
 - **Node.js** >= 18（运行 sidecar 桥接程序所需）

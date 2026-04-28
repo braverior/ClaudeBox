@@ -4,34 +4,42 @@ import {
   Wrench, Check, Plus, X, FileCode2, FileText,
   Image, FileType, Terminal, Globe, Settings2, Cpu, Eraser,
   Loader2, SquareTerminal, Zap, Search, RefreshCw,
+  Presentation, FileSpreadsheet,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { readImageBase64, saveClipboardImage, listGitBranches, checkoutGitBranch, gitDiffFiles } from "../../lib/claude-ipc";
+import { readImageBase64, saveClipboardImage, listGitBranches, checkoutGitBranch, gitDiffFiles, getFileSize } from "../../lib/claude-ipc";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { useT } from "../../lib/i18n";
 import { parseSkills } from "../../lib/skills";
 import { useSkillsStore } from "../../stores/skillsStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useImageViewerStore } from "../../stores/imageViewerStore";
-import { formatDuration } from "../../lib/utils";
+import { formatDuration, formatFileSize } from "../../lib/utils";
 
 export interface Attachment {
   path: string;
   name: string;
-  type: "text" | "image";
+  type: "text" | "image" | "document";
   /** Base64 data URL for image preview */
   dataUrl?: string;
+  /** File size in bytes (for chip display on non-image attachments) */
+  size?: number;
 }
 
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"]);
+const DOCUMENT_EXTENSIONS = new Set([
+  "pdf", "pptx", "ppt", "docx", "doc", "xlsx", "xls", "xlsm", "csv",
+]);
 
-function getAttachmentType(filename: string): "text" | "image" {
+function getAttachmentType(filename: string): "text" | "image" | "document" {
   const ext = filename.split(".").pop()?.toLowerCase() || "";
-  return IMAGE_EXTENSIONS.has(ext) ? "image" : "text";
+  if (IMAGE_EXTENSIONS.has(ext)) return "image";
+  if (DOCUMENT_EXTENSIONS.has(ext)) return "document";
+  return "text";
 }
 
 /** File category for visual styling */
-type FileCategory = "code" | "config" | "doc" | "web" | "shell" | "image" | "other";
+type FileCategory = "code" | "config" | "doc" | "web" | "shell" | "image" | "office" | "other";
 
 const EXT_CATEGORY: Record<string, FileCategory> = {
   ts: "code", tsx: "code", js: "code", jsx: "code", py: "code",
@@ -44,6 +52,9 @@ const EXT_CATEGORY: Record<string, FileCategory> = {
   sh: "shell", sql: "shell",
   png: "image", jpg: "image", jpeg: "image", gif: "image",
   webp: "image", bmp: "image",
+  pdf: "office", pptx: "office", ppt: "office",
+  docx: "office", doc: "office",
+  xlsx: "office", xls: "office", xlsm: "office", csv: "office",
 };
 
 const CATEGORY_STYLE: Record<FileCategory, { bg: string; text: string; border: string }> = {
@@ -53,10 +64,24 @@ const CATEGORY_STYLE: Record<FileCategory, { bg: string; text: string; border: s
   web:    { bg: "bg-purple-500/10", text: "text-purple-400", border: "border-purple-500/20" },
   shell:  { bg: "bg-orange-500/10", text: "text-orange-400", border: "border-orange-500/20" },
   image:  { bg: "bg-rose-500/10",   text: "text-rose-400",   border: "border-rose-500/20" },
+  office: { bg: "bg-sky-500/10",    text: "text-sky-400",    border: "border-sky-500/20" },
   other:  { bg: "bg-zinc-500/10",   text: "text-zinc-400",   border: "border-zinc-500/20" },
 };
 
-function getCategoryIcon(cat: FileCategory) {
+/** Office/PDF per-extension palette (overrides `office` category color). */
+const OFFICE_EXT_STYLE: Record<string, { bg: string; text: string; border: string }> = {
+  pdf:  { bg: "bg-red-500/10",     text: "text-red-400",     border: "border-red-500/20" },
+  pptx: { bg: "bg-orange-500/10",  text: "text-orange-400",  border: "border-orange-500/20" },
+  ppt:  { bg: "bg-orange-500/10",  text: "text-orange-400",  border: "border-orange-500/20" },
+  docx: { bg: "bg-sky-500/10",     text: "text-sky-400",     border: "border-sky-500/20" },
+  doc:  { bg: "bg-sky-500/10",     text: "text-sky-400",     border: "border-sky-500/20" },
+  xlsx: { bg: "bg-green-500/10",   text: "text-green-400",   border: "border-green-500/20" },
+  xls:  { bg: "bg-green-500/10",   text: "text-green-400",   border: "border-green-500/20" },
+  xlsm: { bg: "bg-green-500/10",   text: "text-green-400",   border: "border-green-500/20" },
+  csv:  { bg: "bg-green-500/10",   text: "text-green-400",   border: "border-green-500/20" },
+};
+
+function getCategoryIcon(cat: FileCategory, ext?: string) {
   switch (cat) {
     case "code":   return FileCode2;
     case "config": return Settings2;
@@ -64,6 +89,10 @@ function getCategoryIcon(cat: FileCategory) {
     case "web":    return Globe;
     case "shell":  return Terminal;
     case "image":  return Image;
+    case "office":
+      if (ext === "pptx" || ext === "ppt") return Presentation;
+      if (ext === "xlsx" || ext === "xls" || ext === "xlsm" || ext === "csv") return FileSpreadsheet;
+      return FileText;
     default:       return FileType;
   }
 }
@@ -611,9 +640,11 @@ function AttachmentChip({
   onOpen: () => void;
 }) {
   const cat = getFileCategory(att.name);
-  const style = CATEGORY_STYLE[cat];
-  const Icon = getCategoryIcon(cat);
   const ext = att.name.split(".").pop()?.toLowerCase() || "";
+  const style = OFFICE_EXT_STYLE[ext] || CATEGORY_STYLE[cat];
+  const Icon = getCategoryIcon(cat, ext);
+  const extLabel = ext.length > 4 ? ext.slice(0, 4).toUpperCase() : ext.toUpperCase();
+  const sizeStr = formatFileSize(att.size);
 
   if (att.type === "image") {
     return (
@@ -645,19 +676,37 @@ function AttachmentChip({
 
   return (
     <div
-      className={`flex items-center gap-1.5 pl-2 pr-1 py-1.5 rounded-lg border ${style.border} ${style.bg}
-                   group flex-shrink-0 cursor-pointer hover:brightness-110 transition-all`}
+      className={`relative flex items-center gap-2 pl-1 pr-6 py-1 rounded-lg border border-border
+                   bg-bg-secondary group flex-shrink-0 cursor-pointer hover:brightness-110 transition-all`}
       onDoubleClick={onOpen}
       title={att.path}
     >
-      <Icon size={14} className={style.text} />
-      <div className="flex flex-col min-w-0 leading-none">
-        <span className="text-[11px] text-text-primary truncate max-w-[100px]">{att.name}</span>
-        <span className={`text-[9px] ${style.text} uppercase font-medium`}>{ext}</span>
+      <div
+        className={`flex-shrink-0 w-10 h-10 rounded-md flex items-center justify-center
+                    ${style.bg} border ${style.border}`}
+      >
+        {extLabel ? (
+          <span
+            className={`font-bold tracking-wider uppercase ${style.text}
+                        ${extLabel.length >= 4 ? "text-[9px]" : "text-[11px]"}`}
+          >
+            {extLabel}
+          </span>
+        ) : (
+          <Icon size={18} className={style.text} />
+        )}
+      </div>
+      <div className="flex flex-col min-w-0 leading-tight">
+        <span className="text-[12px] font-medium text-text-primary truncate max-w-[150px]">
+          {att.name}
+        </span>
+        {sizeStr && (
+          <span className="text-[10px] text-text-muted mt-0.5">{sizeStr}</span>
+        )}
       </div>
       <button
         onClick={(e) => { e.stopPropagation(); onRemove(); }}
-        className="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0
+        className="absolute top-1 right-1 w-4 h-4 rounded-full flex items-center justify-center
                    text-text-muted opacity-0 group-hover:opacity-100 hover:text-error hover:bg-error/10
                    transition-all"
       >
@@ -849,6 +898,7 @@ export default function InputArea({
             name: "All Supported",
             extensions: [
               "png", "jpg", "jpeg", "gif", "webp", "svg", "bmp",
+              "pdf", "pptx", "ppt", "docx", "doc", "xlsx", "xls", "xlsm", "csv",
               "ts", "tsx", "js", "jsx", "json", "md", "txt", "rs", "py", "go",
               "html", "css", "yaml", "yml", "toml", "sh", "sql", "xml", "c",
               "cpp", "h", "java", "rb", "php", "lua", "log", "conf", "cfg", "ini",
@@ -857,6 +907,10 @@ export default function InputArea({
           {
             name: "Images",
             extensions: ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"],
+          },
+          {
+            name: "Documents",
+            extensions: ["pdf", "pptx", "ppt", "docx", "doc", "xlsx", "xls", "xlsm", "csv"],
           },
           {
             name: "Code & Text",
@@ -882,7 +936,13 @@ export default function InputArea({
             console.error("Failed to read image:", e);
           }
         }
-        newAttachments.push({ path: p, name, type, dataUrl });
+        let size: number | undefined;
+        try {
+          size = await getFileSize(p);
+        } catch (e) {
+          console.error("Failed to stat file:", e);
+        }
+        newAttachments.push({ path: p, name, type, dataUrl, size });
       }
       setAttachments((prev) => [...prev, ...newAttachments]);
     } catch (e) {
@@ -938,7 +998,7 @@ export default function InputArea({
 
         setAttachments((prev) => [
           ...prev,
-          { path: savedPath, name, type: "image" as const, dataUrl },
+          { path: savedPath, name, type: "image" as const, dataUrl, size: file.size },
         ]);
       } catch (err) {
         console.error("Failed to paste image:", err);

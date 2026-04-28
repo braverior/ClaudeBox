@@ -4,6 +4,25 @@ ClaudeBox 的所有版本更新都记录在这里。
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.5.6] - 2026-04-28
+
+### 新增
+- 文档附件：支持直接拖拽/粘贴 PDF、Word、Excel、PowerPoint、TXT 等文档到输入框；并增加视觉展示
+- 飞书机器人智能化重构：
+  - 改为 tool-use agent，具备 list_projects / view_project / list_tasks / create_task / update_task / set_default_project / recall_memory 等原子工具
+  - 每个聊天独立的持久化记忆（对话历史、消息日志、任务执行结果、默认项目），7 天过期，保存在 `~/.claudebox/data/lark-memory.json`
+  - 执行完成后结果自动回流到该聊天的记忆，下次对话可追溯
+  - 路由模型跟随主设置，不再写死
+  - 新增 `/use <项目>` 设置默认项目，`/忘记` 清空当前聊天记忆
+
+### 优化
+-- 设置 / 添加模型弹窗：点击遮罩不再误关弹窗（避免填一半被关掉），支持 ESC 关闭
+- README 显式说明最低系统要求（macOS 13 Ventura / Windows 10 1803+）
+
+### 修复
+- Windows 上"添加模型"测试报 `API returned HTTP`（状态码空）：`check_model_available` 从 curl 改为 reqwest 直连，回避 `cmd /C` 对 `\n` 换行和 `%` 变量符的破坏
+- macOS 11.2（Big Sur）打开后 UI 无样式：`minimumSystemVersion` 提高到 13.0，安装时即可拦截不兼容系统
+
 ## [0.5.5] - 2026-04-27
 
 ### 新增

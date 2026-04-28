@@ -636,7 +636,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
       addUserMessage(
         currentSessionId,
         content,
-        attachments?.map((a) => ({ name: a.name, type: a.type, path: a.path, dataUrl: a.dataUrl }))
+        attachments?.map((a) => ({ name: a.name, type: a.type, path: a.path, dataUrl: a.dataUrl, size: a.size }))
       );
       setStreaming(currentSessionId, true);
       clearError();

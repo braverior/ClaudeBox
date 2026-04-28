@@ -792,8 +792,15 @@ pub async fn check_node_version() -> Result<String, String> {
 }
 
 /// Check whether a model ID is available by making a minimal API call.
-/// Uses curl to POST to the Anthropic Messages API with max_tokens=1.
+/// Check if a model name is available against the user's API endpoint.
+/// Uses reqwest to POST to the Anthropic Messages API with max_tokens=1.
 /// Returns Ok(()) if model is valid, Err(reason) otherwise.
+///
+/// Note: do NOT shell out to curl here. On Windows, `command_with_path("curl")`
+/// wraps the call in `cmd /C`, and passing `-w "\n%{http_code}"` causes the
+/// embedded LF to terminate the cmd line prematurely (and `%` triggers variable
+/// expansion), leaving the real curl without proper args — the response came
+/// back empty and the user saw "模型不可用：API returned HTTP " (no status).
 #[tauri::command]
 pub async fn check_model_available(
     model: String,
@@ -816,55 +823,65 @@ pub async fn check_model_available(
         "messages": [{"role": "user", "content": "hi"}]
     });
 
-    let key_header = format!("x-api-key: {}", key);
-    let body_str = body.to_string();
+    // Build reqwest client honoring the cached system proxy (same rules
+    // as sidecar spawning in command_with_path: SOCKS5 preferred over HTTP).
+    let proxy_url = PROXY_SOCKS
+        .lock()
+        .ok()
+        .map(|s| s.clone())
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            PROXY_HTTP
+                .lock()
+                .ok()
+                .map(|h| h.clone())
+                .filter(|s| !s.is_empty())
+        });
 
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let result = command_with_path("curl")
-            .args([
-                "-s", "-w", "\n%{http_code}",
-                "-H", &key_header,
-                "-H", "anthropic-version: 2023-06-01",
-                "-H", "content-type: application/json",
-                "-d", &body_str,
-                &endpoint,
-            ])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .output();
-        let _ = tx.send(result);
-    });
-
-    match rx.recv_timeout(std::time::Duration::from_secs(15)) {
-        Ok(Ok(output)) => {
-            let text = String::from_utf8_lossy(&output.stdout);
-            let text = text.trim();
-            // Last line is the HTTP status code (from -w '%{http_code}')
-            let (body_part, status_str) = match text.rfind('\n') {
-                Some(pos) => (&text[..pos], text[pos + 1..].trim()),
-                None => ("", text),
-            };
-            match status_str {
-                "200" => Ok(()),
-                _ => {
-                    // Try to parse error message from response body
-                    if let Ok(err_json) = serde_json::from_str::<serde_json::Value>(body_part) {
-                        if let Some(msg) = err_json
-                            .get("error")
-                            .and_then(|e| e.get("message"))
-                            .and_then(|m| m.as_str())
-                        {
-                            return Err(msg.to_string());
-                        }
-                    }
-                    Err(format!("API returned HTTP {}", status_str))
-                }
-            }
+    let mut builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(15));
+    if let Some(p) = proxy_url {
+        if let Ok(px) = reqwest::Proxy::all(&p) {
+            builder = builder.proxy(px);
         }
-        Ok(Err(e)) => Err(format!("Failed to check model: {}", e)),
-        Err(_) => Err("Model check timed out (15s)".to_string()),
     }
+    let client = builder
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let resp = client
+        .post(&endpoint)
+        .header("x-api-key", &key)
+        .header("anthropic-version", "2023-06-01")
+        .header("content-type", "application/json")
+        .body(body.to_string())
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                "Model check timed out (15s)".to_string()
+            } else {
+                format!("Failed to check model: {}", e)
+            }
+        })?;
+
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+
+    if status.is_success() {
+        return Ok(());
+    }
+
+    // Try to extract a human-readable error message from the response body
+    if let Ok(err_json) = serde_json::from_str::<serde_json::Value>(&text) {
+        if let Some(msg) = err_json
+            .get("error")
+            .and_then(|e| e.get("message"))
+            .and_then(|m| m.as_str())
+        {
+            return Err(msg.to_string());
+        }
+    }
+    Err(format!("API returned HTTP {}", status.as_u16()))
 }
 
 /// Clear the in-memory resume session ID for a given session.
@@ -1528,6 +1545,14 @@ pub fn read_file(path: String) -> Result<String, String> {
         return Err("File too large (>2MB)".to_string());
     }
     std::fs::read_to_string(&path).map_err(|e| e.to_string())
+}
+
+/// Return the file size in bytes (used by attachment chips).
+#[tauri::command]
+pub fn get_file_size(path: String) -> Result<u64, String> {
+    std::fs::metadata(&path)
+        .map(|m| m.len())
+        .map_err(|e| e.to_string())
 }
 
 /// Read an image file and return a data: URL (base64).

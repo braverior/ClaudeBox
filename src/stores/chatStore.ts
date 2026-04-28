@@ -74,7 +74,7 @@ interface ChatState {
   clearClaudeSession: (id: string) => void;
   /** Clear all chat messages for a session (history wipe) */
   clearMessages: (id: string) => void;
-  addUserMessage: (sessionId: string, content: string, attachments?: { name: string; type: string; path?: string; dataUrl?: string }[]) => void;
+  addUserMessage: (sessionId: string, content: string, attachments?: { name: string; type: string; path?: string; dataUrl?: string; size?: number }[]) => void;
   addSystemMessage: (sessionId: string, text: string) => void;
   addLaunchMessage: (sessionId: string, pid: number, resumeFrom?: string) => void;
   handleStreamData: (sessionId: string, data: string, stream: string) => void;

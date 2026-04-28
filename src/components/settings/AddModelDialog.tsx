@@ -53,6 +53,15 @@ export default function AddModelDialog({ open, existingIds, onClose, onAdd }: Ad
     return () => document.removeEventListener("mousedown", handler);
   }, [providerOpen]);
 
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
   if (!open) return null;
 
   const trimmedModel = modelId.trim();
@@ -85,7 +94,6 @@ export default function AddModelDialog({ open, existingIds, onClose, onAdd }: Ad
   return (
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <div className="bg-bg-primary border border-border rounded-2xl w-[520px] max-h-[85vh] flex flex-col shadow-2xl">
         {/* Header */}
