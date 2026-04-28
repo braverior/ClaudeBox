@@ -4,6 +4,11 @@ ClaudeBox 的所有版本更新都记录在这里。
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.5.7] - 2026-04-28
+
+### 修复
+- 发送消息时误报"缺少配置：API Key"：用户已在"添加模型"里给模型配好独立的 apiKey 且测试通过，但 handleSend 只校验全局 apiKey 导致拦截。改为用 resolveModelCreds 解析当前会话模型对应的 per-model 凭证，与实际请求路径一致
+
 ## [0.5.6] - 2026-04-28
 
 ### 新增

@@ -614,9 +614,17 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
     async (content: string, attachments?: Attachment[]) => {
       if (!currentSessionId || !currentSession) return;
 
-      // Validate config before sending
+      // Validate config before sending. Resolve per-model credentials first,
+      // so a model configured via "Add model" (with its own apiKey) works even
+      // when the global apiKey field is empty.
       const effectiveModel = currentSession.model || settings.model;
-      if (!settings.apiKey) {
+      const resolvedCreds = resolveModelCreds(
+        effectiveModel,
+        settings.models,
+        settings.apiKey,
+        settings.baseUrl,
+      );
+      if (!resolvedCreds.apiKey) {
         const missing = ["API Key"];
         if (!effectiveModel) missing.push("Model");
         addSystemMessage(
@@ -642,7 +650,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
       clearError();
       try {
         const resumeId = currentSession.claudeSessionId || undefined;
-        const creds = resolveModelCreds(currentSession.model, settings.models, settings.apiKey, settings.baseUrl);
+        const creds = resolvedCreds;
         const pid = await sendMessage({
           session_id: currentSessionId,
           message: content,
