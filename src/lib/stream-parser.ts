@@ -16,7 +16,7 @@ export interface ContentBlock {
 }
 
 export interface StreamMessage {
-  type: "assistant" | "user" | "system" | "result" | "ask_user" | "exit_plan" | "tool_permission" | "skills" | "error";
+  type: "assistant" | "user" | "system" | "result" | "ask_user" | "exit_plan" | "tool_permission" | "skills" | "error" | "stream_delta";
   subtype?: string;
   session_id?: string;
   message?: {
@@ -64,6 +64,10 @@ export interface StreamMessage {
   planContent?: string;
   // For tool_permission type
   toolName?: string;
+  // For stream_delta type — token-by-token assistant text/thinking deltas
+  // emitted when the sidecar runs with includePartialMessages on.
+  delta_kind?: "text" | "thinking";
+  delta?: string;
 }
 
 export interface StreamPayload {

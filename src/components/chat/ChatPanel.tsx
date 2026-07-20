@@ -546,6 +546,10 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
   const loadingMoreTurns = useRef(false);
   const prevScrollHeight = useRef(0);
   const lastScrollTop = useRef(0);
+  const stickToBottom = useRef(true);
+  // 程序化 pin 期间置真，屏蔽由此触发的 scroll 事件，避免误判"用户上滑"
+  const pinningRef = useRef(false);
+  const msgContentObserver = useRef<ResizeObserver | null>(null);
   const overscrollRef = useRef(0);
   const resetPullTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const currentSession = sessions.find((s) => s.id === currentSessionId);
@@ -949,13 +953,61 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
     [currentSessionId, clearPendingInteraction]
   );
 
-  const currentMessages = currentSessionId
-    ? messages[currentSessionId] || []
-    : [];
+  const currentMessages = useMemo(
+    () => (currentSessionId ? messages[currentSessionId] || [] : []),
+    [messages, currentSessionId]
+  );
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [currentMessages, currentSessionId]);
+  // 贴底跟随策略（不再依赖 60/200/400ms 魔法定时器）：
+  // - stickToBottom 表示"用户此刻停在底部附近、希望跟随新内容"。只有用户主动
+  //   滚动(handleMsgScroll)才更新它；程序化 pin 期间用 pinningRef 屏蔽，避免流式
+  //   内容一帧涨高超过阈值时被误判成"用户上滑"而停止跟随。
+  // - pinToBottom 把滚动条钉到底，由三处驱动：切换会话、消息数组变化(发送/流式)、
+  //   以及 ResizeObserver。ResizeObserver 覆盖 React 状态之外的异步布局(图片
+  //   onload、代码高亮、字体、markdown 二次渲染、工具卡展开)，这些正是旧实现
+  //   靠定时器也常常错过的时刻。
+  const pinToBottom = useCallback(() => {
+    const e = msgScrollRef.current;
+    if (!e || loadingMoreTurns.current) return;
+    pinningRef.current = true;
+    e.scrollTop = e.scrollHeight;
+    requestAnimationFrame(() => {
+      pinningRef.current = false;
+    });
+  }, []);
+
+  // 切换会话：强制贴底并立即钉一次。冷会话是异步懒加载的(先切 id、后到消息)，
+  // 此刻内容可能为空，随后的消息 effect / ResizeObserver 会在真正内容到达并完成
+  // 布局后再次钉底——这修复了"首次打开的会话滚不到底"。
+  useLayoutEffect(() => {
+    stickToBottom.current = true;
+    pinToBottom();
+  }, [currentSessionId, pinToBottom]);
+
+  // 消息数组变化：发送用户消息时强制贴底；流式增长时若仍贴底则跟随。
+  useLayoutEffect(() => {
+    const last = currentMessages[currentMessages.length - 1];
+    if (last?.role === "user") stickToBottom.current = true;
+    if (stickToBottom.current) pinToBottom();
+  }, [currentMessages, pinToBottom]);
+
+  // 观察内容容器尺寸变化，兜住一切 React 状态之外的异步布局。用回调 ref 挂载，
+  // 这样在消息视图/文件视图切换导致节点重建时也能正确重新观察。
+  const msgContentRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      msgContentObserver.current?.disconnect();
+      msgContentObserver.current = null;
+      if (node && typeof ResizeObserver !== "undefined") {
+        const ro = new ResizeObserver(() => {
+          if (stickToBottom.current) pinToBottom();
+        });
+        ro.observe(node);
+        msgContentObserver.current = ro;
+      }
+    },
+    [pinToBottom]
+  );
+
 
   // 分轮分页：计算起始索引
   const msgStartIndex = useMemo(
@@ -1011,6 +1063,11 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
     const el = msgScrollRef.current;
     if (!el) return;
     lastScrollTop.current = el.scrollTop;
+    // 程序化 pin 触发的 scroll 事件不参与"用户是否上滑"判断，否则流式内容一帧
+    // 涨高超过阈值时会把 stickToBottom 误置为 false 而停止跟随。
+    if (pinningRef.current) return;
+    // 记录用户是否停在底部附近，供流式自动跟随判断（上滑看历史时不强拽）
+    stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
   }, []);
 
   // 加载更多后恢复滚动位置
@@ -1188,8 +1245,8 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
             />
           ) : (
             /* Messages */
-            <div ref={msgScrollRef} onScroll={handleMsgScroll} onWheel={handleMsgWheel} className="flex-1 overflow-y-auto pt-4 pb-2">
-              <div className="max-w-3xl mx-auto overflow-hidden">
+            <div ref={msgScrollRef} onScroll={handleMsgScroll} onWheel={handleMsgWheel} style={{ overflowAnchor: "none" }} className="flex-1 overflow-y-auto pt-4 pb-2">
+              <div ref={msgContentRef} className="max-w-3xl mx-auto overflow-hidden">
                 {/* 下拉加载指示器 */}
                 {hasMoreTurns && pullProgress > 0 && (
                   <div

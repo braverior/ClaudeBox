@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>ClaudeBox 需要使用麦克风以便系统听写功能（Fn 键语音输入）能将语音转写到输入框中。</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>ClaudeBox 需要使用语音识别以支持系统听写（Fn 键语音输入）。</string>
+</dict>
+</plist>

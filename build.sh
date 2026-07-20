@@ -262,6 +262,8 @@ cmd_oss_mirror() {
     --pattern '*.dmg.sig' \
     --pattern '*.tar.gz' \
     --pattern '*.tar.gz.sig' \
+    --pattern '*-setup.exe' \
+    --pattern '*-setup.exe.sig' \
     --pattern '*.nsis.zip' \
     --pattern '*.nsis.zip.sig' \
     --pattern '*.msi' \

@@ -50,3 +50,6 @@ test-share-*.png
 
 # ── OSS publish credentials (local override, never commit) ────────
 .oss-publish.json
+
+# 本地官网,不纳入版本库
+website/

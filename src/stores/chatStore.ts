@@ -332,6 +332,111 @@ function appendNewBlocks(
   return result;
 }
 
+// ── Streaming delta batching ────────────────────────────────────────
+//
+// includePartialMessages delivers assistant text token-by-token. Applying a
+// store update per token forces the whole message list to re-render — and the
+// growing text block's ReactMarkdown to re-parse — on every token, which janks
+// long responses. Instead, buffer the deltas and flush them on an animation
+// frame (capped at ~30fps) so a burst of tokens collapses into one render.
+
+const STREAMING_ID = "__streaming__";
+const STREAM_FLUSH_MIN_MS = 33;
+
+const pendingStreamDeltas: Record<string, { kind: "text" | "thinking"; text: string }[]> = {};
+let streamFlushHandle: number | null = null;
+let lastStreamFlushAt = 0;
+
+/** Fold a run of deltas onto a content array, growing the trailing same-kind
+ *  block (id-less, so it's a streamed block) or appending a new one. */
+function applyDeltasToContent(
+  content: ContentBlock[],
+  deltas: { kind: "text" | "thinking"; text: string }[]
+): ContentBlock[] {
+  const out = [...content];
+  for (const { kind, text } of deltas) {
+    const last = out[out.length - 1];
+    if (last && last.type === kind && !last.id) {
+      out[out.length - 1] =
+        kind === "thinking"
+          ? { ...last, thinking: (last.thinking || "") + text }
+          : { ...last, text: (last.text || "") + text };
+    } else {
+      out.push(kind === "thinking" ? { type: "thinking", thinking: text } : { type: "text", text });
+    }
+  }
+  return out;
+}
+
+/** Apply all buffered deltas immediately in a single store update. Called on
+ *  each (rate-limited) animation frame, and synchronously before any non-delta
+ *  event so the placeholder is complete before it gets finalized/appended to. */
+function flushStreamDeltasNow() {
+  if (streamFlushHandle != null) {
+    cancelAnimationFrame(streamFlushHandle);
+    streamFlushHandle = null;
+  }
+  const sessionIds = Object.keys(pendingStreamDeltas);
+  if (sessionIds.length === 0) return;
+
+  const allMessages = { ...useChatStore.getState().messages };
+  let changed = false;
+
+  for (const sessionId of sessionIds) {
+    const deltas = pendingStreamDeltas[sessionId];
+    delete pendingStreamDeltas[sessionId];
+    if (!deltas || deltas.length === 0) continue;
+
+    const msgs = [...(allMessages[sessionId] || [])];
+    // Close the "launching" placeholder once real tokens arrive.
+    const launchIdx = msgs.findIndex(
+      (m) => m.role === "assistant" && m.streamMessageId === "__launch__"
+    );
+    if (launchIdx >= 0 && msgs[launchIdx].isStreaming) {
+      msgs[launchIdx] = { ...msgs[launchIdx], isStreaming: false };
+    }
+    let idx = msgs.findIndex((m) => m.role === "assistant" && m.streamMessageId === STREAMING_ID);
+    if (idx < 0) {
+      msgs.push({
+        id: v4Style(),
+        streamMessageId: STREAMING_ID,
+        role: "assistant",
+        content: [],
+        timestamp: Date.now(),
+        isStreaming: true,
+      });
+      idx = msgs.length - 1;
+    }
+    msgs[idx] = {
+      ...msgs[idx],
+      content: applyDeltasToContent(msgs[idx].content, deltas),
+      isStreaming: true,
+    };
+    allMessages[sessionId] = msgs;
+    changed = true;
+  }
+
+  lastStreamFlushAt = performance.now();
+  if (changed) useChatStore.setState({ messages: allMessages });
+}
+
+/** Schedule a flush on the next animation frame, rate-limited to ~30fps. */
+function scheduleStreamFlush() {
+  if (streamFlushHandle != null) return;
+  streamFlushHandle = requestAnimationFrame(() => {
+    streamFlushHandle = null;
+    if (
+      performance.now() - lastStreamFlushAt < STREAM_FLUSH_MIN_MS &&
+      Object.keys(pendingStreamDeltas).length > 0
+    ) {
+      // Too soon since the last flush — defer one more frame to cap re-parses.
+      scheduleStreamFlush();
+      return;
+    }
+    flushStreamDeltasNow();
+  });
+}
+
 // ── Store ───────────────────────────────────────────────────────────
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -531,6 +636,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     try {
       const event: StreamMessage = JSON.parse(data);
+
+      // High-frequency token deltas: buffer and flush on an animation frame
+      // (~30fps) instead of re-rendering per token. Everything else flushes any
+      // pending deltas first so the streaming placeholder is up to date.
+      if (event.type === "stream_delta") {
+        if (event.delta != null) {
+          (pendingStreamDeltas[sessionId] ||= []).push({
+            kind: event.delta_kind === "thinking" ? "thinking" : "text",
+            text: event.delta,
+          });
+          scheduleStreamFlush();
+        }
+        return;
+      }
+      flushStreamDeltasNow();
+
       const msgs = [...(get().messages[sessionId] || [])];
 
       const finalizeLaunch = () => {
@@ -611,6 +732,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
         finalizeLaunch();
         processTaskToolCalls(sessionId, incomingContent);
 
+        const usage = event.message.usage
+          ? {
+              input_tokens: event.message.usage.input_tokens,
+              output_tokens: event.message.usage.output_tokens,
+              cache_creation_input_tokens: event.message.usage.cache_creation_input_tokens,
+              cache_read_input_tokens: event.message.usage.cache_read_input_tokens,
+              server_tool_use_input_tokens: event.message.usage.server_tool_use_input_tokens,
+              contextWindow: event.message.usage.contextWindow,
+            }
+          : undefined;
+
+        // If a live-streamed placeholder is open, this full message IS its
+        // finalized form — adopt the real id and replace the streamed preview
+        // text with the authoritative content (avoids double-rendering the
+        // text that already arrived via stream_delta). Otherwise fall back to
+        // id-keyed reconciliation for the non-streaming path.
+        const streamingIdx = msgs.findIndex(
+          (m) => m.role === "assistant" && m.streamMessageId === "__streaming__"
+        );
         const existingIdx = streamMsgId
           ? msgs.findIndex(
               (m) =>
@@ -619,22 +759,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
             )
           : -1;
 
-        if (existingIdx >= 0) {
+        if (streamingIdx >= 0) {
+          const existing = msgs[streamingIdx];
+          msgs[streamingIdx] = {
+            ...existing,
+            // Keep `existing.id` stable (it's the React list key). Only adopt the
+            // real id into streamMessageId for matching follow-up assistant
+            // events — changing `id` here would remount the whole bubble and
+            // cause a visible flash when streaming finalizes.
+            streamMessageId: streamMsgId,
+            content: incomingContent,
+            model: event.message.model || existing.model,
+            isStreaming: true,
+            usage: usage ?? existing.usage,
+          };
+        } else if (existingIdx >= 0) {
           const existing = msgs[existingIdx];
           msgs[existingIdx] = {
             ...existing,
             content: appendNewBlocks(existing.content, incomingContent),
             model: event.message.model || existing.model,
-            usage: event.message.usage
-              ? {
-                  input_tokens: event.message.usage.input_tokens,
-                  output_tokens: event.message.usage.output_tokens,
-                  cache_creation_input_tokens: event.message.usage.cache_creation_input_tokens,
-                  cache_read_input_tokens: event.message.usage.cache_read_input_tokens,
-                  server_tool_use_input_tokens: event.message.usage.server_tool_use_input_tokens,
-                  contextWindow: event.message.usage.contextWindow,
-                }
-              : existing.usage,
+            usage: usage ?? existing.usage,
           };
         } else {
           msgs.push({
@@ -645,16 +790,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             timestamp: Date.now(),
             model: event.message.model,
             isStreaming: true,
-            usage: event.message.usage
-              ? {
-                  input_tokens: event.message.usage.input_tokens,
-                  output_tokens: event.message.usage.output_tokens,
-                  cache_creation_input_tokens: event.message.usage.cache_creation_input_tokens,
-                  cache_read_input_tokens: event.message.usage.cache_read_input_tokens,
-                  server_tool_use_input_tokens: event.message.usage.server_tool_use_input_tokens,
-                  contextWindow: event.message.usage.contextWindow,
-                }
-              : undefined,
+            usage,
           });
         }
       } else if (event.type === "user" && event.message) {
@@ -744,8 +880,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
         }
         for (let i = 0; i < msgs.length; i++) {
-          if (msgs[i].isStreaming) {
-            msgs[i] = { ...msgs[i], isStreaming: false };
+          if (msgs[i].isStreaming || msgs[i].streamMessageId === "__streaming__") {
+            msgs[i] = {
+              ...msgs[i],
+              isStreaming: false,
+              // Drop the live-stream placeholder marker so a new turn's deltas
+              // don't append onto a finished (or errored) message.
+              streamMessageId:
+                msgs[i].streamMessageId === "__streaming__"
+                  ? undefined
+                  : msgs[i].streamMessageId,
+            };
           }
         }
         const projectName = get().sessions.find((s) => s.id === sessionId)?.projectName;
@@ -842,8 +987,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
     const msgs = [...(get().messages[sessionId] || [])];
     for (let i = 0; i < msgs.length; i++) {
-      if (msgs[i].isStreaming) {
-        msgs[i] = { ...msgs[i], isStreaming: false };
+      if (msgs[i].isStreaming || msgs[i].streamMessageId === "__streaming__") {
+        msgs[i] = {
+          ...msgs[i],
+          isStreaming: false,
+          streamMessageId:
+            msgs[i].streamMessageId === "__streaming__"
+              ? undefined
+              : msgs[i].streamMessageId,
+        };
       }
     }
     const sessions = get().sessions.map((s) =>

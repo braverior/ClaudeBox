@@ -561,6 +561,11 @@ async function main() {
     // cmd.exe drops the empty string, and `--permission-mode` gets consumed
     // as a setting-source value → "Invalid setting source: --permission-mode".
     settingSources: ["user", "project", "local"],
+    // Stream assistant text/thinking token-by-token. With this on, the SDK
+    // emits extra `stream_event` messages carrying content_block_delta chunks
+    // (see the `case "stream_event"` below). The full `assistant` message still
+    // follows and remains authoritative for tool_use blocks, ids, and usage.
+    includePartialMessages: true,
   };
 
   if (cwd) options.cwd = cwd;
@@ -683,6 +688,32 @@ async function main() {
             duration_api_ms: message.duration_api_ms,
             num_turns: message.num_turns,
           });
+          break;
+        }
+
+        case "stream_event": {
+          // includePartialMessages — raw Anthropic streaming events. Forward
+          // only text/thinking deltas as lightweight `stream_delta` messages so
+          // the UI can render a token-by-token typewriter effect. The complete
+          // `assistant` message that follows finalizes the content.
+          const ev = message.event;
+          if (ev && ev.type === "content_block_delta" && ev.delta) {
+            if (ev.delta.type === "text_delta" && ev.delta.text) {
+              emit({
+                type: "stream_delta",
+                session_id: message.session_id,
+                delta_kind: "text",
+                delta: ev.delta.text,
+              });
+            } else if (ev.delta.type === "thinking_delta" && ev.delta.thinking) {
+              emit({
+                type: "stream_delta",
+                session_id: message.session_id,
+                delta_kind: "thinking",
+                delta: ev.delta.thinking,
+              });
+            }
+          }
           break;
         }
 
