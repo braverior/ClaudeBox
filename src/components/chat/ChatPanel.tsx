@@ -1506,10 +1506,14 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
               {fallbackInteractionTool && pendingInteraction && (
                 <div className="max-w-3xl mx-auto px-4 mb-4">
                   <ToolCallCard
+                    // 按 会话+requestId 唯一,确保每个新交互都是全新实例——否则
+                    // ToolCallCard 内部的答案 state 会被上一个问题(甚至上一个项目)
+                    // 复用,导致"未接管就预填了上个问题的答案"。
+                    key={`fallback-${currentSessionId}-${pendingInteraction.requestId}`}
                     block={{
                       type: "tool_use",
                       name: fallbackInteractionTool,
-                      id: pendingInteraction.requestId || "pending-interaction",
+                      id: `fallback-${currentSessionId}-${pendingInteraction.requestId}`,
                       input:
                         pendingInteraction.input ||
                         ({ questions: pendingInteraction.questions } as Record<string, unknown>),
