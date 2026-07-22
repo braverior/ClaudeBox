@@ -2126,6 +2126,360 @@ pub fn get_context_tokens(session_id: String, project_path: String) -> Option<u6
     last_context
 }
 
+// ── Claude session discovery (JSONL as source of truth) ─────────────
+// Encode a project path the same way Claude Code does: every non-alphanumeric
+// char becomes '-'. NOTE: lossy — never decode a dir name back to a path;
+// always read the real path from a `cwd` field inside the JSONL.
+fn encode_project_path(project_path: &str) -> String {
+    project_path
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect()
+}
+
+fn claude_home() -> Option<std::path::PathBuf> {
+    #[cfg(unix)]
+    let home = std::env::var("HOME").ok()?;
+    #[cfg(windows)]
+    let home = std::env::var("USERPROFILE").ok()?;
+    Some(std::path::PathBuf::from(home))
+}
+
+fn systemtime_to_ms(t: std::time::SystemTime) -> i64 {
+    t.duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// Lightweight metadata for one Claude session (one JSONL file).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaudeSessionMeta {
+    pub claude_session_id: String,
+    pub project_path: String,
+    pub title: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub last_model: Option<String>,
+    pub permission_mode: Option<String>,
+    pub message_count: u32,
+}
+
+/// Extract cheap metadata from one JSONL file without reading it whole.
+/// Head-reads the first ~256KB (project path / title / created hint) and
+/// tail-reads the last ~100KB (last model / permission mode). Returns None
+/// for empty / meta-only files (no user or assistant line seen).
+fn scan_session_file(path: &std::path::Path) -> Option<ClaudeSessionMeta> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let claude_session_id = path.file_stem()?.to_str()?.to_string();
+    let meta = std::fs::metadata(path).ok()?;
+    let file_len = meta.len();
+    let updated_ms = meta.modified().map(systemtime_to_ms).unwrap_or(0);
+    let created_ms = meta
+        .created()
+        .map(systemtime_to_ms)
+        .unwrap_or(updated_ms);
+
+    let mut project_path = String::new();
+    let mut title = String::new();
+    let mut ai_title: Option<String> = None;
+    let mut last_model: Option<String> = None;
+    let mut permission_mode: Option<String> = None;
+    let mut message_count: u32 = 0;
+
+    let handle_line = |val: &serde_json::Value,
+                       project_path: &mut String,
+                       title: &mut String,
+                       ai_title: &mut Option<String>,
+                       last_model: &mut Option<String>,
+                       permission_mode: &mut Option<String>,
+                       message_count: &mut u32| {
+        // Skip sub-agent internal transcript lines for metadata purposes.
+        if val.get("isSidechain").and_then(|b| b.as_bool()) == Some(true) {
+            return;
+        }
+        let t = val.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        if project_path.is_empty() {
+            if let Some(cwd) = val.get("cwd").and_then(|c| c.as_str()) {
+                *project_path = cwd.to_string();
+            }
+        }
+        if let Some(pm) = val.get("permissionMode").and_then(|c| c.as_str()) {
+            *permission_mode = Some(pm.to_string());
+        }
+        match t {
+            "user" => {
+                *message_count += 1;
+                if title.is_empty() {
+                    // User content is either a string (typed message) or an
+                    // array of blocks (may hold a leading text block).
+                    if let Some(s) = val.pointer("/message/content").and_then(|c| c.as_str()) {
+                        let s = s.trim();
+                        if !s.is_empty() && !s.starts_with("<") {
+                            *title = s.chars().take(80).collect();
+                        }
+                    } else if let Some(arr) =
+                        val.pointer("/message/content").and_then(|c| c.as_array())
+                    {
+                        for b in arr {
+                            if b.get("type").and_then(|t| t.as_str()) == Some("text") {
+                                if let Some(txt) = b.get("text").and_then(|t| t.as_str()) {
+                                    let txt = txt.trim();
+                                    if !txt.is_empty() && !txt.starts_with("<") {
+                                        *title = txt.chars().take(80).collect();
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            "assistant" => {
+                *message_count += 1;
+                if let Some(m) = val.pointer("/message/model").and_then(|c| c.as_str()) {
+                    if !m.is_empty() && m != "<synthetic>" {
+                        *last_model = Some(m.to_string());
+                    }
+                }
+            }
+            "permission-mode" => {
+                if let Some(pm) = val.get("permissionMode").and_then(|c| c.as_str()) {
+                    *permission_mode = Some(pm.to_string());
+                }
+            }
+            "ai-title" => {
+                if let Some(at) = val.get("aiTitle").and_then(|c| c.as_str()) {
+                    *ai_title = Some(at.to_string());
+                }
+            }
+            _ => {}
+        }
+    };
+
+    // Head read (first ~256KB, capped lines)
+    {
+        let file = std::fs::File::open(path).ok()?;
+        let mut reader = std::io::BufReader::new(file).take(256 * 1024);
+        let mut line = String::new();
+        let mut lines_read = 0;
+        loop {
+            line.clear();
+            match reader.read_line(&mut line) {
+                Ok(0) => break,
+                Ok(_) => {}
+                Err(_) => break,
+            }
+            lines_read += 1;
+            if lines_read > 2000 {
+                break;
+            }
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                handle_line(
+                    &val,
+                    &mut project_path,
+                    &mut title,
+                    &mut ai_title,
+                    &mut last_model,
+                    &mut permission_mode,
+                    &mut message_count,
+                );
+            }
+        }
+    }
+
+    // Tail read (last ~100KB) for the most recent model / permission mode / ai-title
+    if file_len > 100_000 {
+        if let Ok(file) = std::fs::File::open(path) {
+            let mut reader = std::io::BufReader::new(file);
+            if reader.seek(SeekFrom::Start(file_len - 100_000)).is_ok() {
+                let mut discard = String::new();
+                let _ = reader.read_line(&mut discard); // skip partial line
+                let mut line = String::new();
+                loop {
+                    line.clear();
+                    match reader.read_line(&mut line) {
+                        Ok(0) => break,
+                        Ok(_) => {}
+                        Err(_) => break,
+                    }
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                        // Only update the "last seen" fields from the tail.
+                        if val.get("isSidechain").and_then(|b| b.as_bool()) == Some(true) {
+                            continue;
+                        }
+                        let t = val.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                        if t == "assistant" {
+                            if let Some(m) =
+                                val.pointer("/message/model").and_then(|c| c.as_str())
+                            {
+                                if !m.is_empty() && m != "<synthetic>" {
+                                    last_model = Some(m.to_string());
+                                }
+                            }
+                        } else if t == "permission-mode" {
+                            if let Some(pm) = val.get("permissionMode").and_then(|c| c.as_str())
+                            {
+                                permission_mode = Some(pm.to_string());
+                            }
+                        } else if t == "ai-title" {
+                            if let Some(at) = val.get("aiTitle").and_then(|c| c.as_str()) {
+                                ai_title = Some(at.to_string());
+                            }
+                        } else if let Some(pm) =
+                            val.get("permissionMode").and_then(|c| c.as_str())
+                        {
+                            permission_mode = Some(pm.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if message_count == 0 {
+        return None;
+    }
+    if let Some(at) = ai_title {
+        if !at.trim().is_empty() {
+            title = at.chars().take(80).collect();
+        }
+    }
+
+    Some(ClaudeSessionMeta {
+        claude_session_id,
+        project_path,
+        title,
+        created_at: created_ms,
+        updated_at: updated_ms,
+        last_model,
+        permission_mode,
+        message_count,
+    })
+}
+
+/// Scan `~/.claude/projects/*/*.jsonl` and return cheap metadata for every
+/// non-empty session, sorted by updatedAt (mtime) descending. Returns ALL
+/// sessions found on disk (including CLI-created ones) — the frontend groups
+/// them by projectPath.
+#[tauri::command]
+pub fn list_claude_sessions() -> Result<Vec<ClaudeSessionMeta>, String> {
+    let home = claude_home().ok_or("no home dir")?;
+    let projects_dir = home.join(".claude").join("projects");
+    let mut out: Vec<ClaudeSessionMeta> = Vec::new();
+
+    let Ok(project_dirs) = std::fs::read_dir(&projects_dir) else {
+        return Ok(out); // no projects dir yet → empty list
+    };
+    for pdir in project_dirs.flatten() {
+        if !pdir.file_type().map(|f| f.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let Ok(files) = std::fs::read_dir(pdir.path()) else {
+            continue;
+        };
+        for f in files.flatten() {
+            let p = f.path();
+            if p.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+                continue;
+            }
+            if let Some(m) = scan_session_file(&p) {
+                out.push(m);
+            }
+        }
+    }
+    out.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    Ok(out)
+}
+
+/// Return the raw JSONL text for one session so the frontend can parse it into
+/// display messages. For very large transcripts, only the tail is returned.
+#[tauri::command]
+pub fn read_session_transcript(
+    claude_session_id: String,
+    project_path: String,
+) -> Result<String, String> {
+    use std::io::{Read, Seek, SeekFrom};
+    const MAX_BYTES: u64 = 20 * 1024 * 1024;
+
+    let home = claude_home().ok_or("no home dir")?;
+    let projects_dir = home.join(".claude").join("projects");
+    let encoded = encode_project_path(&project_path);
+    let mut path = projects_dir
+        .join(&encoded)
+        .join(format!("{}.jsonl", claude_session_id));
+
+    // Fallback: project path may not match the encoding (e.g. moved). Search
+    // all project subdirs for the session file.
+    if !path.exists() {
+        if let Ok(dirs) = std::fs::read_dir(&projects_dir) {
+            for d in dirs.flatten() {
+                let candidate = d.path().join(format!("{}.jsonl", claude_session_id));
+                if candidate.exists() {
+                    path = candidate;
+                    break;
+                }
+            }
+        }
+    }
+    if !path.exists() {
+        return Ok(String::new());
+    }
+
+    let file = std::fs::File::open(&path).map_err(|e| e.to_string())?;
+    let len = file.metadata().map_err(|e| e.to_string())?.len();
+    let mut reader = std::io::BufReader::new(file);
+    let mut out = String::new();
+    if len > MAX_BYTES {
+        reader
+            .seek(SeekFrom::Start(len - MAX_BYTES))
+            .map_err(|e| e.to_string())?;
+        let mut discard = String::new();
+        let _ = reader.read_line(&mut discard); // drop partial first line
+    }
+    reader.read_to_string(&mut out).map_err(|e| e.to_string())?;
+    Ok(out)
+}
+
+/// Permanently delete a session's JSONL file. WARNING: this is Claude Code's
+/// own transcript — deleting it also removes the history the CLI sees.
+#[tauri::command]
+pub fn delete_session_transcript(
+    claude_session_id: String,
+    project_path: String,
+) -> Result<(), String> {
+    let home = claude_home().ok_or("no home dir")?;
+    let projects_dir = home.join(".claude").join("projects");
+    let encoded = encode_project_path(&project_path);
+    let mut path = projects_dir
+        .join(&encoded)
+        .join(format!("{}.jsonl", claude_session_id));
+    if !path.exists() {
+        if let Ok(dirs) = std::fs::read_dir(&projects_dir) {
+            for d in dirs.flatten() {
+                let candidate = d.path().join(format!("{}.jsonl", claude_session_id));
+                if candidate.exists() {
+                    path = candidate;
+                    break;
+                }
+            }
+        }
+    }
+    if path.exists() {
+        std::fs::remove_file(&path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn copy_image_to_clipboard(base64_png: String) -> Result<(), String> {
     use base64::Engine as _;

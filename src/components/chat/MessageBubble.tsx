@@ -166,6 +166,9 @@ const TextBlock = memo(function TextBlock({ text }: { text: string }) {
           pre({ children }) {
             return <>{children}</>;
           },
+          table({ children }) {
+            return <div className="md-table-wrap"><table>{children}</table></div>;
+          },
         }}
       >
         {text}
@@ -1319,8 +1322,11 @@ export default function MessageBubble({
               return (
                 <div key={key} className="px-1 text-text-primary">
                   <TextBlock text={block.text} />
-                  {/* Streaming indicator on the last text block */}
-                  {message.isStreaming && isLastBlock && (
+                  {/* 流式转圈只挂在「最后一条 assistant 消息」上(即当前流式位置)。
+                      一轮里每个步骤都是独立的 assistant 消息且 isStreaming 会一直
+                      保持到轮末才统一清除,若不加 isLastAssistant 限制,中间步骤的
+                      text 消息会全部一直转圈、直到对话结束才一起停。 */}
+                  {message.isStreaming && isLastBlock && isLastAssistant && (
                     <span className="inline-flex items-center gap-1.5 mt-1 text-text-muted">
                       <Loader2 size={12} className="animate-spin" />
                     </span>

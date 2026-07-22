@@ -426,6 +426,9 @@ export default function ToolCallCard({ block, result, pendingInteraction, onResp
                         className="text-accent hover:underline cursor-pointer"
                       >{children}</a>
                     ),
+                    table: ({ children }) => (
+                      <div className="md-table-wrap"><table>{children}</table></div>
+                    ),
                   }}
                 >{planContent}</ReactMarkdown>
                 </div>
@@ -498,6 +501,9 @@ export default function ToolCallCard({ block, result, pendingInteraction, onResp
                       onClick={(e) => { e.preventDefault(); if (href) shellOpen(href); }}
                       className="text-accent hover:underline cursor-pointer"
                     >{children}</a>
+                  ),
+                  table: ({ children }) => (
+                    <div className="md-table-wrap"><table>{children}</table></div>
                   ),
                 }}
               >{savedPlanContent}</ReactMarkdown>

@@ -19,6 +19,7 @@ import {
   type UpdateStatus,
 } from "./lib/updater";
 import { getVersion } from "@tauri-apps/api/app";
+import { storageRead, storageWrite } from "./lib/storage";
 import { useSettingsStore } from "./stores/settingsStore";
 import { useChatStore } from "./stores/chatStore";
 import { useTokenUsageStore } from "./stores/tokenUsageStore";
@@ -108,6 +109,21 @@ export default function App() {
     getVersion().then(setAppVersion).catch(() => {});
     return () => clearTimeout(timer);
   }, []);
+
+  // 版本更新后首次启动:自动弹出「更新日志」。记录上次已展示过的版本，与当前版本
+  // 不一致(即刚更新过，或首次安装)时弹一次，并立即写回当前版本，避免重复弹。
+  useEffect(() => {
+    if (!appVersion) return;
+    let cancelled = false;
+    storageRead("changelog-seen-version")
+      .then((seen) => {
+        if (cancelled || seen === appVersion) return;
+        setChangelogOpen(true);
+        storageWrite("changelog-seen-version", appVersion).catch(() => {});
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [appVersion]);
 
   // Apply theme class to root element
   useEffect(() => {

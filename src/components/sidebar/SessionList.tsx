@@ -1,25 +1,27 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
-import { useChatStore } from "../../stores/chatStore";
-import { stopSession } from "../../lib/claude-ipc";
+import { useChatStore, type Session } from "../../stores/chatStore";
 import { formatRelativeDate } from "../../lib/utils";
-import {
-  FolderOpen,
-  Trash2,
-  Pin,
-  PinOff,
-  ChevronDown,
-  ChevronRight,
-  GitCompare,
-} from "lucide-react";
+import { FolderOpen, GitCompare } from "lucide-react";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { useT } from "../../lib/i18n";
 
 interface ContextMenu {
   x: number;
   y: number;
-  sessionId: string;
   projectPath: string;
-  pinned: boolean;
+  sessionId: string;
+}
+
+interface ProjectGroup {
+  projectPath: string;
+  projectName: string;
+  sessions: Session[];
+  latest: Session;
+  updatedAt: number;
+  count: number;
+  unread: boolean;
+  running: boolean;
+  waiting: boolean;
 }
 
 interface SessionListProps {
@@ -33,55 +35,59 @@ export default function SessionList({ searchQuery = "" }: SessionListProps) {
     streamingSessions,
     pendingInteractions,
     switchSession,
-    removeSession,
-    reorderPinned,
-    togglePinned,
     openDiffDialog,
   } = useChatStore();
   const t = useT();
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Drag-and-drop only operates on the pinned section. Indices refer to
-  // positions in the pinned-only array (kept in a ref to avoid stale-closure
-  // issues with onDragOver firing before the React state from onDragStart commits).
-  const dragFromPinnedIdxRef = useRef<number | null>(null);
-  const [dragOverPinnedIdx, setDragOverPinnedIdx] = useState<number | null>(null);
-  const [dragFromPinnedIdx, setDragFromPinnedIdx] = useState<number | null>(null);
-
-  const [pinnedCollapsed, setPinnedCollapsed] = useState(false);
-  const [recentCollapsed, setRecentCollapsed] = useState(false);
-
   const isSearching = searchQuery.trim().length > 0;
   const matchSearch = useCallback(
-    (s: { projectName: string; projectPath: string }) => {
+    (g: { projectName: string; projectPath: string }) => {
       if (!isSearching) return true;
       const q = searchQuery.trim().toLowerCase();
       return (
-        (s.projectName || "").toLowerCase().includes(q) ||
-        (s.projectPath || "").toLowerCase().includes(q)
+        (g.projectName || "").toLowerCase().includes(q) ||
+        (g.projectPath || "").toLowerCase().includes(q)
       );
     },
     [searchQuery, isSearching]
   );
 
-  // Pinned: keep array order (manual). Recent: sort by updatedAt desc.
-  const pinnedAll = useMemo(() => sessions.filter((s) => s.pinned), [sessions]);
-  const recentAll = useMemo(
-    () =>
-      [...sessions.filter((s) => !s.pinned)].sort(
-        (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)
-      ),
-    [sessions]
+  const currentProjectPath = useMemo(
+    () => sessions.find((s) => s.id === currentSessionId)?.projectPath ?? null,
+    [sessions, currentSessionId]
   );
-  const visiblePinned = useMemo(
-    () => pinnedAll.filter(matchSearch),
-    [pinnedAll, matchSearch]
-  );
-  const visibleRecent = useMemo(
-    () => recentAll.filter(matchSearch),
-    [recentAll, matchSearch]
-  );
+
+  // Group sessions by project; sort projects by most-recent activity.
+  const groups = useMemo<ProjectGroup[]>(() => {
+    const byPath = new Map<string, Session[]>();
+    for (const s of sessions) {
+      const arr = byPath.get(s.projectPath);
+      if (arr) arr.push(s);
+      else byPath.set(s.projectPath, [s]);
+    }
+    const out: ProjectGroup[] = [];
+    for (const [projectPath, arr] of byPath) {
+      const sorted = [...arr].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+      const latest = sorted[0];
+      out.push({
+        projectPath,
+        projectName: latest.projectName,
+        sessions: sorted,
+        latest,
+        updatedAt: latest.updatedAt || 0,
+        count: sorted.length,
+        unread: sorted.some((s) => s.unread),
+        running: sorted.some((s) => !!streamingSessions[s.id]),
+        waiting: sorted.some((s) => !!pendingInteractions[s.id]),
+      });
+    }
+    out.sort((a, b) => b.updatedAt - a.updatedAt);
+    return out;
+  }, [sessions, streamingSessions, pendingInteractions]);
+
+  const visibleGroups = useMemo(() => groups.filter(matchSearch), [groups, matchSearch]);
 
   // Close context menu on click outside or Escape
   useEffect(() => {
@@ -103,21 +109,15 @@ export default function SessionList({ searchQuery = "" }: SessionListProps) {
   }, [contextMenu]);
 
   const handleContextMenu = useCallback(
-    (
-      e: React.MouseEvent,
-      sessionId: string,
-      projectPath: string,
-      pinned: boolean
-    ) => {
+    (e: React.MouseEvent, projectPath: string, sessionId: string) => {
       e.preventDefault();
       e.stopPropagation();
-      setContextMenu({ x: e.clientX, y: e.clientY, sessionId, projectPath, pinned });
+      setContextMenu({ x: e.clientX, y: e.clientY, projectPath, sessionId });
     },
     []
   );
 
-  // Clamp the menu inside the viewport once it has rendered, so that
-  // right-clicking near the bottom/right edge doesn't hide items like "Delete".
+  // Clamp the menu inside the viewport once it has rendered.
   useLayoutEffect(() => {
     if (!contextMenu || !menuRef.current) return;
     const rect = menuRef.current.getBoundingClientRect();
@@ -133,19 +133,6 @@ export default function SessionList({ searchQuery = "" }: SessionListProps) {
     }
   }, [contextMenu]);
 
-  const handleDelete = useCallback(
-    async (sessionId: string) => {
-      setContextMenu(null);
-      try {
-        await stopSession(sessionId);
-      } catch {
-        // ignore
-      }
-      removeSession(sessionId);
-    },
-    [removeSession]
-  );
-
   const handleOpenFolder = useCallback((projectPath: string) => {
     setContextMenu(null);
     shellOpen(projectPath);
@@ -159,61 +146,14 @@ export default function SessionList({ searchQuery = "" }: SessionListProps) {
     [openDiffDialog]
   );
 
-  const handleTogglePinned = useCallback(
-    (sessionId: string) => {
-      setContextMenu(null);
-      togglePinned(sessionId);
+  const handleClickProject = useCallback(
+    (g: ProjectGroup) => {
+      // Already viewing a session in this project → stay on it.
+      if (currentProjectPath === g.projectPath) return;
+      switchSession(g.latest.id);
     },
-    [togglePinned]
+    [currentProjectPath, switchSession]
   );
-
-  const handleDragStart = useCallback(
-    (e: React.DragEvent, pinnedIdx: number) => {
-      if (isSearching) return;
-      dragFromPinnedIdxRef.current = pinnedIdx;
-      setDragFromPinnedIdx(pinnedIdx);
-      e.dataTransfer.effectAllowed = "move";
-      try {
-        e.dataTransfer.setData("text/plain", String(pinnedIdx));
-      } catch {
-        // ignore
-      }
-    },
-    [isSearching]
-  );
-
-  const handleDragOver = useCallback(
-    (e: React.DragEvent, pinnedIdx: number) => {
-      if (isSearching) return;
-      // Always preventDefault — without it the browser refuses the drop. We
-      // can't gate on dragFromIdx because state from onDragStart may not have
-      // committed by the first onDragOver.
-      e.preventDefault();
-      e.dataTransfer.dropEffect = "move";
-      if (dragOverPinnedIdx !== pinnedIdx) setDragOverPinnedIdx(pinnedIdx);
-    },
-    [isSearching, dragOverPinnedIdx]
-  );
-
-  const handleDrop = useCallback(
-    (e: React.DragEvent, pinnedIdx: number) => {
-      e.preventDefault();
-      const from = dragFromPinnedIdxRef.current;
-      if (from !== null && from !== pinnedIdx) {
-        reorderPinned(from, pinnedIdx);
-      }
-      dragFromPinnedIdxRef.current = null;
-      setDragFromPinnedIdx(null);
-      setDragOverPinnedIdx(null);
-    },
-    [reorderPinned]
-  );
-
-  const handleDragEnd = useCallback(() => {
-    dragFromPinnedIdxRef.current = null;
-    setDragFromPinnedIdx(null);
-    setDragOverPinnedIdx(null);
-  }, []);
 
   if (sessions.length === 0) {
     return (
@@ -225,7 +165,7 @@ export default function SessionList({ searchQuery = "" }: SessionListProps) {
     );
   }
 
-  if (visiblePinned.length === 0 && visibleRecent.length === 0) {
+  if (visibleGroups.length === 0) {
     return (
       <div className="flex-1 px-3 py-8 text-center text-text-muted text-sm">
         {t("session.noMatch")}
@@ -233,139 +173,65 @@ export default function SessionList({ searchQuery = "" }: SessionListProps) {
     );
   }
 
-  const renderItem = (
-    session: typeof sessions[number],
-    /** Index inside pinnedAll (used for drag), or null for recent items */
-    pinnedIdx: number | null
-  ) => {
-    const isActive = session.id === currentSessionId;
-    const isRunning = !!streamingSessions[session.id];
-    const isUnread = !!session.unread && !isActive;
-    const isWaiting = !!pendingInteractions[session.id];
-    const isDragging = pinnedIdx !== null && dragFromPinnedIdx === pinnedIdx;
-    const isDropTarget =
-      pinnedIdx !== null &&
-      dragFromPinnedIdx !== null &&
-      dragOverPinnedIdx === pinnedIdx &&
-      dragFromPinnedIdx !== pinnedIdx;
-    const draggable = pinnedIdx !== null && !isSearching;
-
-    return (
-      <div
-        key={session.id}
-        draggable={draggable}
-        onDragStart={
-          draggable ? (e) => handleDragStart(e, pinnedIdx!) : undefined
-        }
-        onDragOver={
-          pinnedIdx !== null ? (e) => handleDragOver(e, pinnedIdx) : undefined
-        }
-        onDrop={pinnedIdx !== null ? (e) => handleDrop(e, pinnedIdx) : undefined}
-        onDragEnd={pinnedIdx !== null ? handleDragEnd : undefined}
-        onClick={() => switchSession(session.id)}
-        onContextMenu={(e) =>
-          handleContextMenu(e, session.id, session.projectPath, !!session.pinned)
-        }
-        className={`group relative flex items-center gap-2 pl-3 pr-3 py-2.5 rounded-lg mb-0.5 cursor-pointer overflow-hidden transition-colors ${
-          isActive
-            ? "bg-bg-tertiary/50 text-text-primary"
-            : "text-text-secondary hover:bg-bg-tertiary/50 hover:text-text-primary"
-        } ${isDragging ? "opacity-40" : ""} ${
-          isDropTarget ? "ring-1 ring-accent/60" : ""
-        }`}
-      >
-        {/* Left indicator bar — shown when active or running */}
-        {(isActive || isRunning) && (
-          <span
-            className="absolute left-0 top-1.5 bottom-1.5 w-[2.5px] bg-accent rounded-r"
-            aria-hidden
-          />
-        )}
-        {/* Running: gradient wave sweeping from left to right */}
-        {isRunning && (
-          <span
-            className="absolute inset-y-0 left-0 w-2/3 bg-gradient-to-r from-accent/25 via-accent/10 to-transparent animate-running-sweep pointer-events-none"
-            aria-hidden
-          />
-        )}
-        <FolderOpen size={14} className="flex-shrink-0 opacity-60" />
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5">
-            <span className="text-sm truncate" title={session.projectPath}>
-              {session.projectName}
-            </span>
-            {isUnread && (
-              <span
-                className="flex-shrink-0 w-2 h-2 rounded-full bg-warning"
-                title={t("session.unread")}
-              />
-            )}
-          </div>
-          <div className="text-xs mt-0.5">
-            {isWaiting ? (
-              <span className="text-warning font-medium">{t("session.waitingTakeover")}</span>
-            ) : (
-              <span className="text-text-muted">{formatRelativeDate(session.updatedAt)}</span>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const sectionHeader = (
-    label: string,
-    count: number,
-    collapsed: boolean,
-    onToggle: () => void
-  ) => (
-    <button
-      type="button"
-      onClick={onToggle}
-      className="w-full flex items-center gap-1 px-2 py-1.5 mt-1 mb-0.5 rounded
-                 text-text-muted hover:text-text-secondary transition-colors select-none"
-    >
-      {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
-      <span className="text-[11px] uppercase tracking-wider font-semibold">
-        {label}
-      </span>
-      <span className="text-[11px] opacity-60">{count}</span>
-    </button>
-  );
-
-  // Search mode forces both sections expanded so results aren't hidden.
-  const showPinnedItems = isSearching || !pinnedCollapsed;
-  const showRecentItems = isSearching || !recentCollapsed;
-
   return (
     <div className="flex-1 overflow-y-auto px-2 py-1">
-      {pinnedAll.length > 0 && (
-        <>
-          {sectionHeader(
-            t("session.section.pinned"),
-            visiblePinned.length,
-            pinnedCollapsed && !isSearching,
-            () => setPinnedCollapsed((c) => !c)
-          )}
-          {showPinnedItems &&
-            visiblePinned.map((session) => {
-              const pinnedIdx = pinnedAll.indexOf(session);
-              return renderItem(session, pinnedIdx);
-            })}
-        </>
-      )}
-
-      {recentAll.length > 0 && (
-        <>
-          {sectionHeader(
-            t("session.section.recent"),
-            visibleRecent.length,
-            recentCollapsed && !isSearching,
-            () => setRecentCollapsed((c) => !c)
-          )}
-          {showRecentItems && visibleRecent.map((session) => renderItem(session, null))}
-        </>
-      )}
+      {visibleGroups.map((g) => {
+        const isActive = currentProjectPath === g.projectPath;
+        const isUnread = g.unread && !isActive;
+        return (
+          <div
+            key={g.projectPath}
+            onClick={() => handleClickProject(g)}
+            onContextMenu={(e) => handleContextMenu(e, g.projectPath, g.latest.id)}
+            className={`group relative flex items-center gap-2 pl-3 pr-3 py-2.5 rounded-lg mb-0.5 cursor-pointer overflow-hidden transition-colors ${
+              isActive
+                ? "bg-bg-tertiary/50 text-text-primary"
+                : "text-text-secondary hover:bg-bg-tertiary/50 hover:text-text-primary"
+            }`}
+          >
+            {/* Left indicator bar — shown when active or running */}
+            {(isActive || g.running) && (
+              <span
+                className="absolute left-0 top-1.5 bottom-1.5 w-[2.5px] bg-accent rounded-r"
+                aria-hidden
+              />
+            )}
+            {/* Running: gradient wave sweeping from left to right */}
+            {g.running && (
+              <span
+                className="absolute inset-y-0 left-0 w-2/3 bg-gradient-to-r from-accent/25 via-accent/10 to-transparent animate-running-sweep pointer-events-none"
+                aria-hidden
+              />
+            )}
+            <FolderOpen size={14} className="flex-shrink-0 opacity-60" />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm truncate" title={g.projectPath}>
+                  {g.projectName}
+                </span>
+                {g.count > 1 && (
+                  <span className="flex-shrink-0 text-[10px] px-1.5 py-px rounded-full bg-bg-tertiary/70 text-text-muted">
+                    {g.count}
+                  </span>
+                )}
+                {isUnread && (
+                  <span
+                    className="flex-shrink-0 w-2 h-2 rounded-full bg-warning"
+                    title={t("session.unread")}
+                  />
+                )}
+              </div>
+              <div className="text-xs mt-0.5">
+                {g.waiting ? (
+                  <span className="text-warning font-medium">{t("session.waitingTakeover")}</span>
+                ) : (
+                  <span className="text-text-muted">{formatRelativeDate(g.updatedAt)}</span>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })}
 
       {/* Context menu */}
       {contextMenu && (
@@ -374,13 +240,6 @@ export default function SessionList({ searchQuery = "" }: SessionListProps) {
           className="fixed z-50 min-w-[160px] py-1 rounded-lg bg-bg-secondary border border-border shadow-xl shadow-black/20 animate-fade-in"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
-          <button
-            onClick={() => handleTogglePinned(contextMenu.sessionId)}
-            className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-text-secondary hover:bg-bg-tertiary/50 hover:text-text-primary transition-colors"
-          >
-            {contextMenu.pinned ? <PinOff size={14} /> : <Pin size={14} />}
-            {contextMenu.pinned ? t("session.unpin") : t("session.pin")}
-          </button>
           <button
             onClick={() => handleOpenFolder(contextMenu.projectPath)}
             className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-text-secondary hover:bg-bg-tertiary/50 hover:text-text-primary transition-colors"
@@ -394,14 +253,6 @@ export default function SessionList({ searchQuery = "" }: SessionListProps) {
           >
             <GitCompare size={14} />
             {t("session.viewDiff")}
-          </button>
-          <div className="my-1 border-t border-border" />
-          <button
-            onClick={() => handleDelete(contextMenu.sessionId)}
-            className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-error/80 hover:bg-error/10 hover:text-error transition-colors"
-          >
-            <Trash2 size={14} />
-            {t("session.delete")}
           </button>
         </div>
       )}

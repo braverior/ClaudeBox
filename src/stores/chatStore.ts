@@ -11,21 +11,16 @@ import type {
 import { useTaskStore } from "./taskStore";
 import { useSkillsStore } from "./skillsStore";
 import { v4Style } from "../lib/utils";
-import { storageRead, storageWrite, storageRemove } from "../lib/storage";
+import { listClaudeSessions, readSessionTranscript, deleteSessionTranscript, type ClaudeSessionMeta } from "../lib/claude-ipc";
+import { parseTranscript } from "../lib/transcript-parser";
 import { sendNotification, isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
-
-/** Wraps a promise with a timeout — rejects after `ms` milliseconds */
-function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
-  return Promise.race([
-    p,
-    new Promise<T>((_, reject) => setTimeout(() => reject(new Error("timeout")), ms)),
-  ]);
-}
 
 export interface Session {
   id: string;
   projectPath: string;
   projectName: string;
+  /** Short title derived from the JSONL (ai-title or first user message). */
+  title?: string;
   model: string;
   permissionMode: string;
   allowedTools: string[];
@@ -35,10 +30,8 @@ export interface Session {
   updatedAt: number;
   /** Real Claude session ID (from system init message) — used for --resume across app restarts */
   claudeSessionId?: string;
-  /** Background completion not yet seen by user (cleared on switchSession) */
+  /** Background completion not yet seen by user (cleared on switchSession) — in-memory only */
   unread?: boolean;
-  /** Pinned to the top section (manual order, immune from auto-bump) */
-  pinned?: boolean;
 }
 
 export interface QueuedMessage {
@@ -86,9 +79,12 @@ interface ChatState {
   /** Whether the store has finished loading from persistent storage */
   loaded: boolean;
 
-  /** Async initialization — loads data from file storage, migrates from localStorage */
+  /** Async initialization — discovers sessions from Claude's JSONL transcripts */
   init: () => Promise<void>;
+  /** Open a project: focus its most-recent session, or create the first one. Returns session id. */
   createSession: (projectPath: string, model: string, permissionMode: string) => string;
+  /** Always create a NEW empty session for a project (multi-session). Returns the new session id. */
+  createProjectSession: (projectPath: string, model: string, permissionMode: string) => string;
   removeSession: (id: string) => void;
   switchSession: (id: string) => void;
   updateSession: (id: string, updates: Partial<Pick<Session, "model" | "permissionMode" | "allowedTools" | "claudeSessionId">>) => void;
@@ -107,10 +103,6 @@ interface ChatState {
   clearPendingInteraction: (sessionId: string) => void;
   /** Mark an interactive tool as answered, persisting data across re-renders */
   setToolAnswered: (toolUseId: string, data: AnsweredToolData) => void;
-  /** Reorder sessions inside the pinned section. Indices refer to positions among pinned sessions. */
-  reorderPinned: (fromIndex: number, toIndex: number) => void;
-  /** Toggle a session's pinned state. */
-  togglePinned: (id: string) => void;
   /** Refresh updatedAt for a session (used on user activity; recent section is sorted by updatedAt). */
   bumpSessionToTop: (id: string) => void;
   /** Mark a session as unread (background completion). */
@@ -135,96 +127,36 @@ interface ChatState {
   closeDiffDialog: () => void;
 }
 
-// ── File storage keys ───────────────────────────────────────────────
+// ── Persistence ─────────────────────────────────────────────────────
+//
+// Claude Code's own JSONL transcripts (~/.claude/projects/<encoded>/<uuid>.jsonl)
+// are the SINGLE SOURCE OF TRUTH. ClaudeBox no longer stores its own copy of
+// sessions or messages. The `save*` helpers below are intentional no-ops kept
+// so their (many) call sites stay untouched; message history is read on demand
+// from the JSONL and session metadata is rediscovered at startup.
+// NOTE: settingsStore uses its own storage keys — that is unaffected.
 
-const SESSIONS_KEY = "sessions";
-const MESSAGES_KEY_PREFIX = "msgs-";
-const ANSWERED_TOOLS_KEY = "answered-tools";
+function saveSessions(_sessions: Session[]) { /* no-op: JSONL is source of truth */ }
+function saveMessages(_sessionId: string, _msgs: ChatMessage[]) { /* no-op */ }
+function saveAnsweredTools(_tools: Record<string, AnsweredToolData>) { /* no-op */ }
+function removeMessages(_sessionId: string) { /* no-op: see deleteSessionTranscript */ }
 
-// ── Legacy localStorage keys (for migration) ───────────────────────
-
-const LS_SESSIONS_KEY = "claudebox-sessions";
-const LS_MESSAGES_KEY_PREFIX = "claudebox-msgs-";
-
-// ── File storage helpers ────────────────────────────────────────────
-
-async function loadSessionsFromFile(): Promise<Session[]> {
-  try {
-    const data = await withTimeout(storageRead(SESSIONS_KEY), 5000);
-    if (data) {
-      const sessions: Session[] = JSON.parse(data);
-      return sessions.map((s) => ({
-        ...s,
-        allowedTools: mergeAllowedTools(s.allowedTools),
-      }));
-    }
-  } catch { /* ignore */ }
-  return [];
-}
-
-function saveSessions(sessions: Session[]) {
-  storageWrite(SESSIONS_KEY, JSON.stringify(sessions)).catch(() => {});
-}
-
-async function loadMessagesFromFile(sessionId: string): Promise<ChatMessage[]> {
-  try {
-    const data = await withTimeout(storageRead(MESSAGES_KEY_PREFIX + sessionId), 5000);
-    if (data) return JSON.parse(data);
-  } catch { /* ignore */ }
-  return [];
-}
-
-function saveMessages(sessionId: string, msgs: ChatMessage[]) {
-  storageWrite(MESSAGES_KEY_PREFIX + sessionId, JSON.stringify(msgs)).catch(() => {});
-}
-
-async function loadAnsweredTools(): Promise<Record<string, AnsweredToolData>> {
-  try {
-    const data = await withTimeout(storageRead(ANSWERED_TOOLS_KEY), 5000);
-    if (data) return JSON.parse(data);
-  } catch { /* ignore */ }
-  return {};
-}
-
-function saveAnsweredTools(tools: Record<string, AnsweredToolData>) {
-  storageWrite(ANSWERED_TOOLS_KEY, JSON.stringify(tools)).catch(() => {});
-}
-
-function removeMessages(sessionId: string) {
-  storageRemove(MESSAGES_KEY_PREFIX + sessionId).catch(() => {});
-}
-
-// ── Legacy localStorage helpers (for migration) ────────────────────
-
-function loadSessionsFromLocalStorage(): Session[] {
-  try {
-    const stored = localStorage.getItem(LS_SESSIONS_KEY);
-    if (stored) {
-      const sessions: Session[] = JSON.parse(stored);
-      return sessions.map((s) => ({
-        ...s,
-        allowedTools: mergeAllowedTools(s.allowedTools),
-      }));
-    }
-  } catch { /* ignore */ }
-  return [];
-}
-
-function loadMessagesFromLocalStorage(sessionId: string): ChatMessage[] {
-  try {
-    const stored = localStorage.getItem(LS_MESSAGES_KEY_PREFIX + sessionId);
-    if (stored) return JSON.parse(stored);
-  } catch { /* ignore */ }
-  return [];
-}
-
-function clearLocalStorageData(sessions: Session[]) {
-  try {
-    localStorage.removeItem(LS_SESSIONS_KEY);
-    for (const s of sessions) {
-      localStorage.removeItem(LS_MESSAGES_KEY_PREFIX + s.id);
-    }
-  } catch { /* ignore */ }
+/** Build a ClaudeBox Session from discovered JSONL metadata. The Claude session
+ *  UUID doubles as the ClaudeBox session id for discovered sessions. */
+function metaToSession(m: ClaudeSessionMeta): Session {
+  const settings = useSettingsStore.getState().settings;
+  return {
+    id: m.claudeSessionId,
+    claudeSessionId: m.claudeSessionId,
+    projectPath: m.projectPath,
+    projectName: extractProjectName(m.projectPath),
+    title: m.title || undefined,
+    model: m.lastModel || settings.defaultModel || settings.model || "",
+    permissionMode: m.permissionMode || settings.permissionMode || "",
+    allowedTools: mergeAllowedTools(undefined),
+    createdAt: m.createdAt,
+    updatedAt: m.updatedAt,
+  };
 }
 
 // ── Desktop notifications ──────────────────────────────────────────
@@ -455,59 +387,39 @@ export const useChatStore = create<ChatState>((set, get) => ({
   loaded: false,
 
   init: async () => {
-    // 1. Try loading from file storage
-    let sessions = await loadSessionsFromFile();
-
-    // 2. If empty, migrate from localStorage
-    if (sessions.length === 0) {
-      const lsSessions = loadSessionsFromLocalStorage();
-      if (lsSessions.length > 0) {
-        sessions = lsSessions;
-        // Save sessions to file storage
-        await storageWrite(SESSIONS_KEY, JSON.stringify(sessions)).catch(() => {});
-        // Migrate messages for all sessions
-        for (const s of sessions) {
-          const msgs = loadMessagesFromLocalStorage(s.id);
-          if (msgs.length > 0) {
-            await storageWrite(
-              MESSAGES_KEY_PREFIX + s.id,
-              JSON.stringify(msgs)
-            ).catch(() => {});
-          }
-        }
-        // Clean up localStorage after successful migration
-        clearLocalStorageData(sessions);
-      }
+    // Discover all sessions from Claude Code's own JSONL transcripts.
+    let sessions: Session[] = [];
+    try {
+      const metas = await listClaudeSessions();
+      sessions = metas.filter((m) => m.messageCount > 0).map(metaToSession);
+    } catch {
+      sessions = [];
     }
-
-    // 3. Load messages for the most recent session
-    const messages: Record<string, ChatMessage[]> = {};
-    if (sessions.length > 0) {
-      const msgs = await loadMessagesFromFile(sessions[0].id);
-      if (msgs.length > 0) {
-        messages[sessions[0].id] = msgs;
-      }
-    }
-
-    // 4. Load answered tools
-    const answeredTools = await loadAnsweredTools();
-
     set({
       sessions,
       currentSessionId: null,
-      messages,
-      answeredTools,
+      messages: {},
+      answeredTools: {},
       loaded: true,
     });
   },
 
   createSession: (projectPath, model, permissionMode) => {
-    const existing = get().sessions.find((s) => s.projectPath === projectPath);
+    // Opening a project focuses its most-recent session if one exists.
+    const existing = get()
+      .sessions.filter((s) => s.projectPath === projectPath)
+      .sort((a, b) => b.updatedAt - a.updatedAt)[0];
     if (existing) {
-      set({ currentSessionId: existing.id, streamError: null });
+      get().switchSession(existing.id);
       return existing.id;
     }
+    return get().createProjectSession(projectPath, model, permissionMode);
+  },
 
+  createProjectSession: (projectPath, model, permissionMode) => {
+    // A brand-new session has no Claude UUID yet — use a temp id as the routing
+    // key. The real UUID lands on claudeSessionId via the `system` init event,
+    // and a new <uuid>.jsonl is born once the first message is sent.
     const id = v4Style();
     const session: Session = {
       id,
@@ -520,10 +432,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       updatedAt: Date.now(),
     };
     const sessions = [session, ...get().sessions];
-    saveSessions(sessions);
     set({
       sessions,
       currentSessionId: id,
+      streamError: null,
       messages: { ...get().messages, [id]: [] },
       stderrLogs: { ...get().stderrLogs, [id]: [] },
     });
@@ -531,13 +443,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   removeSession: (id) => {
+    const target = get().sessions.find((s) => s.id === id);
+    // Permanently delete Claude's transcript file (also removes CLI-visible
+    // history). Sessions never sent (no claudeSessionId) have no file.
+    if (target?.claudeSessionId) {
+      deleteSessionTranscript(target.claudeSessionId, target.projectPath).catch(() => {});
+    }
     const sessions = get().sessions.filter((s) => s.id !== id);
-    saveSessions(sessions);
     const messages = { ...get().messages };
     const stderrLogs = { ...get().stderrLogs };
     delete messages[id];
     delete stderrLogs[id];
-    removeMessages(id);
     useTaskStore.getState().clearTasks(id);
     const currentId =
       get().currentSessionId === id
@@ -549,14 +465,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
   switchSession: (id) => {
     const currentMsgs = get().messages[id];
     if (!currentMsgs) {
-      // Load messages from file storage asynchronously
-      loadMessagesFromFile(id).then((loaded) => {
-        if (loaded.length > 0) {
-          set({
-            messages: { ...get().messages, [id]: loaded },
-          });
-        }
-      });
+      const session = get().sessions.find((s) => s.id === id);
+      if (session?.claudeSessionId) {
+        // Lazy-load the transcript from the JSONL on first open.
+        readSessionTranscript(session.claudeSessionId, session.projectPath)
+          .then((raw) => {
+            if (!raw) return;
+            const parsed = parseTranscript(raw);
+            // Only apply if still unloaded (avoid clobbering a live stream).
+            if (!get().messages[id] || get().messages[id].length === 0) {
+              set({ messages: { ...get().messages, [id]: parsed } });
+            }
+          })
+          .catch(() => {});
+      }
     }
     set({ currentSessionId: id, streamError: null });
     get().clearUnread(id);
@@ -1031,55 +953,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const answeredTools = { ...get().answeredTools, [toolUseId]: data };
     set({ answeredTools });
     saveAnsweredTools(answeredTools);
-  },
-
-  reorderPinned: (fromIndex, toIndex) => {
-    const sessions = [...get().sessions];
-    const pinnedSessions = sessions.filter((s) => s.pinned);
-    if (
-      fromIndex < 0 ||
-      fromIndex >= pinnedSessions.length ||
-      toIndex < 0 ||
-      toIndex >= pinnedSessions.length ||
-      fromIndex === toIndex
-    ) {
-      return;
-    }
-    const moved = pinnedSessions[fromIndex];
-    const target = pinnedSessions[toIndex];
-    const fromGlobal = sessions.indexOf(moved);
-    const toGlobal = sessions.indexOf(target);
-    sessions.splice(fromGlobal, 1);
-    const adjustedTo = fromGlobal < toGlobal ? toGlobal - 1 : toGlobal;
-    sessions.splice(adjustedTo, 0, moved);
-    saveSessions(sessions);
-    set({ sessions });
-  },
-
-  togglePinned: (id) => {
-    const sessions = get().sessions;
-    const idx = sessions.findIndex((s) => s.id === id);
-    if (idx === -1) return;
-    const target = sessions[idx];
-    const nextPinned = !target.pinned;
-    if (nextPinned) {
-      // Place at end of pinned section (= just before first non-pinned)
-      const without = sessions.filter((s) => s.id !== id);
-      const insertAt = without.findIndex((s) => !s.pinned);
-      const updated = { ...target, pinned: true };
-      const next = [...without];
-      if (insertAt === -1) next.push(updated);
-      else next.splice(insertAt, 0, updated);
-      saveSessions(next);
-      set({ sessions: next });
-    } else {
-      // Just flip the flag; recent section is sorted by updatedAt at render time
-      const next = sessions.map((s) =>
-        s.id === id ? { ...s, pinned: false } : s
-      );
-      saveSessions(next);
-      set({ sessions: next });
-    }
   },
 
   bumpSessionToTop: (id) => {

@@ -273,6 +273,33 @@ export async function getContextTokens(sessionId: string, projectPath: string): 
   return invoke("get_context_tokens", { sessionId, projectPath });
 }
 
+/** Lightweight metadata for one Claude session (one JSONL file on disk). */
+export interface ClaudeSessionMeta {
+  claudeSessionId: string;
+  projectPath: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  lastModel: string | null;
+  permissionMode: string | null;
+  messageCount: number;
+}
+
+/** Scan ~/.claude/projects and return metadata for every non-empty session. */
+export async function listClaudeSessions(): Promise<ClaudeSessionMeta[]> {
+  return invoke("list_claude_sessions");
+}
+
+/** Read the raw JSONL transcript text for one session (tail-capped if huge). */
+export async function readSessionTranscript(claudeSessionId: string, projectPath: string): Promise<string> {
+  return invoke("read_session_transcript", { claudeSessionId, projectPath });
+}
+
+/** Permanently delete a session's JSONL file (also removes CLI-visible history). */
+export async function deleteSessionTranscript(claudeSessionId: string, projectPath: string): Promise<void> {
+  return invoke("delete_session_transcript", { claudeSessionId, projectPath });
+}
+
 /** Open the OS network proxy settings panel (macOS / Windows). */
 export async function openProxySettings(): Promise<void> {
   return invoke("open_proxy_settings");

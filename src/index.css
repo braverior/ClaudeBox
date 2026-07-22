@@ -200,15 +200,16 @@ html, body, #root {
 .markdown-body blockquote p { margin: 0.3em 0; }
 
 /* Tables — 圆角 + 柔和质感 */
+.markdown-body .md-table-wrap {
+  margin: 1em 0;
+  overflow-x: auto;   /* 宽表格在此横向滚动，窄表格仍撑满 */
+}
 .markdown-body table {
   border-collapse: separate;
   border-spacing: 0;
-  margin: 1em 0;
-  width: 100%;
+  width: 100%;        /* display:table + width:100% → 内容短时自动撑满，右侧不留空 */
   font-size: 0.9em;
-  display: block;
   overflow: hidden;
-  overflow-x: auto;
   border-radius: 10px;
   border: 1px solid color-mix(in srgb, var(--color-border) 80%, transparent);
   background: color-mix(in srgb, var(--color-bg-secondary) 60%, transparent);

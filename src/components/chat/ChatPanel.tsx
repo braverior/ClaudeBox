@@ -2,13 +2,13 @@ import React, { useEffect, useRef, useCallback, useState, useMemo, memo, useLayo
 import { useChatStore } from "../../stores/chatStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useTaskStore } from "../../stores/taskStore";
-import { sendMessage, stopSession, onStream, getGitBranch, listGitBranches, checkoutGitBranch, sendResponse, clearSessionResume, openInTerminal, gitDiffFiles, gitDiffStat, getContextTokens } from "../../lib/claude-ipc";
+import { sendMessage, stopSession, onStream, getGitBranch, listGitBranches, checkoutGitBranch, sendResponse, openInTerminal, gitDiffFiles, gitDiffStat, getContextTokens } from "../../lib/claude-ipc";
 import { larkSendCommand } from "../../lib/lark-ipc";
 import { useLarkStore } from "../../stores/larkStore";
 import { resolveModelCreds } from "../../lib/providers";
 import { getCurrentWindow, currentMonitor, LogicalSize, PhysicalPosition, PhysicalSize } from "@tauri-apps/api/window";
 import { useT } from "../../lib/i18n";
-import { startWindowDrag, handleTitleBarDoubleClick, isWindows } from "../../lib/utils";
+import { startWindowDrag, handleTitleBarDoubleClick, isWindows, formatRelativeDate } from "../../lib/utils";
 import WindowControls from "../WindowControls";
 import MessageBubble from "./MessageBubble";
 import ToolCallCard from "./ToolCallCard";
@@ -16,8 +16,7 @@ import InputArea, { type Attachment } from "./InputArea";
 import TaskBoard from "./TaskBoard";
 import FileTree from "./FileTree";
 import FileViewer from "./FileViewer";
-import NewSessionDialog from "./NewSessionDialog";
-import { Sparkles, FolderOpen, Terminal, GitBranch, PanelRightClose, PanelRight, ChevronDown, ChevronRight, Loader2, CheckCircle, Check, FileText, ShieldAlert, ShieldCheck, Edit3 } from "lucide-react";
+import { Sparkles, FolderOpen, Terminal, GitBranch, PanelRightClose, PanelRight, ChevronDown, ChevronRight, Loader2, CheckCircle, Check, FileText, ShieldAlert, ShieldCheck, Edit3, MessageSquare, Plus, Trash2 } from "lucide-react";
 import type { ChatMessage, ContentBlock, PendingInteraction } from "../../lib/stream-parser";
 
 interface ChatPanelProps {
@@ -497,6 +496,138 @@ function BranchDiffBadge({
   );
 }
 
+/** Header dropdown to switch between / create sessions within the current
+ *  project. Sessions are Claude Code transcripts under the same project dir. */
+function SessionSwitcher({
+  projectPath,
+  currentSessionId,
+}: {
+  projectPath: string;
+  currentSessionId: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const t = useT();
+  const sessions = useChatStore((s) => s.sessions);
+  const switchSession = useChatStore((s) => s.switchSession);
+  const createProjectSession = useChatStore((s) => s.createProjectSession);
+  const removeSession = useChatStore((s) => s.removeSession);
+  const streamingSessions = useChatStore((s) => s.streamingSessions);
+  const settings = useSettingsStore((s) => s.settings);
+
+  const projectSessions = useMemo(
+    () =>
+      sessions
+        .filter((s) => s.projectPath === projectPath)
+        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)),
+    [sessions, projectPath]
+  );
+  const current = projectSessions.find((s) => s.id === currentSessionId);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const handleNew = useCallback(() => {
+    setOpen(false);
+    createProjectSession(
+      projectPath,
+      settings.defaultModel || settings.model || current?.model || "",
+      current?.permissionMode || settings.permissionMode || ""
+    );
+  }, [createProjectSession, projectPath, settings, current]);
+
+  const handlePick = useCallback(
+    (id: string) => {
+      setOpen(false);
+      if (id !== currentSessionId) switchSession(id);
+    },
+    [currentSessionId, switchSession]
+  );
+
+  const handleDelete = useCallback(
+    (e: React.MouseEvent, id: string) => {
+      e.stopPropagation();
+      if (!window.confirm(t("session.deleteConfirm"))) return;
+      removeSession(id);
+    },
+    [removeSession, t]
+  );
+
+  // 收起态只显示通用「会话列表」标签(不用当前会话标题——标题可能是很长的 URL);
+  // 具体会话标题在展开的下拉里看。
+  const label = t("session.list");
+
+  return (
+    <div ref={ref} className="relative flex-shrink-0 min-w-0">
+      <button
+        onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
+        className="flex items-center gap-1 max-w-[240px] px-2 py-0.5 rounded-full bg-bg-tertiary
+                   text-xs text-text-muted hover:text-text-primary hover:bg-bg-tertiary/60
+                   transition-colors cursor-pointer"
+        title={t("session.switch")}
+      >
+        <MessageSquare size={11} className="flex-shrink-0" />
+        <span className="truncate">{label}</span>
+        {projectSessions.length > 1 && (
+          <span className="flex-shrink-0 opacity-60">({projectSessions.length})</span>
+        )}
+        <ChevronDown size={10} className="flex-shrink-0 opacity-50" />
+      </button>
+      {open && (
+        <div className="absolute top-full left-0 mt-1 min-w-[240px] max-w-[340px] max-h-[340px]
+                        overflow-y-auto rounded-lg bg-bg-secondary border border-border shadow-xl z-50 py-1">
+          <button
+            onClick={(e) => { e.stopPropagation(); handleNew(); }}
+            className="flex items-center gap-2 w-full text-left px-3 py-1.5 text-xs text-accent
+                       hover:bg-accent/10 transition-colors"
+          >
+            <Plus size={12} className="flex-shrink-0" />
+            <span>{t("session.newSession")}</span>
+          </button>
+          <div className="my-1 border-t border-border" />
+          {projectSessions.map((s) => {
+            const isCurrent = s.id === currentSessionId;
+            const isRunning = !!streamingSessions[s.id];
+            return (
+              <div
+                key={s.id}
+                onClick={() => handlePick(s.id)}
+                className={`group/item flex items-center gap-2 w-full px-3 py-1.5 text-xs cursor-pointer transition-colors
+                  ${isCurrent
+                    ? "text-accent bg-accent/10"
+                    : "text-text-secondary hover:text-text-primary hover:bg-bg-tertiary/50"
+                  }`}
+              >
+                {isCurrent
+                  ? <Check size={10} className="flex-shrink-0" />
+                  : <span className="w-[10px] flex-shrink-0" />}
+                <div className="flex-1 min-w-0">
+                  <div className="truncate">{s.title || t("session.untitled")}</div>
+                  <div className="text-[10px] text-text-muted">{formatRelativeDate(s.updatedAt)}</div>
+                </div>
+                {isRunning && <Loader2 size={10} className="flex-shrink-0 animate-spin text-accent" />}
+                <button
+                  onClick={(e) => handleDelete(e, s.id)}
+                  className="flex-shrink-0 opacity-0 group-hover/item:opacity-100 p-0.5 rounded
+                             text-text-muted hover:text-error transition-all"
+                  title={t("session.delete")}
+                >
+                  <Trash2 size={11} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** 返回"倒数第 showLastN 轮对话"的起始消息索引（以 user 消息为轮次起点） */
 function getTurnStartIndex(messages: ChatMessage[], showLastN: number): number {
   let turnsFound = 0;
@@ -528,8 +659,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
     clearError,
     updateSession,
     clearPendingInteraction,
-    clearClaudeSession,
-    clearMessages,
+    createProjectSession,
     enqueueMessage,
     removeQueuedMessage,
     popQueuedMessage,
@@ -573,7 +703,6 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
   const [sessionViewerStates, setSessionViewerStates] = useState<
     Record<string, { files: string[]; activeIndex: number; minimized: boolean }>
   >({});
-  const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
   const [changedFiles, setChangedFiles] = useState<Set<string>>(new Set());
   const [contextTokensCache, setContextTokensCache] = useState<Record<string, number>>({});
   const [fileTreeRefreshKey, setFileTreeRefreshKey] = useState(0);
@@ -916,22 +1045,16 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
     [currentSessionId, updateSession]
   );
 
+  // "新会话": create a brand-new session in the current project (a fresh Claude
+  // conversation → new JSONL). The old session stays intact in the switcher.
   const handleClearSession = useCallback(() => {
-    setShowNewSessionDialog(true);
-  }, []);
-
-  const handleNewSessionConfirm = useCallback((clearHistory: boolean) => {
-    setShowNewSessionDialog(false);
-    if (!currentSessionId) return;
-    clearClaudeSession(currentSessionId);
-    clearSessionResume(currentSessionId).catch(() => {});
-    if (clearHistory) {
-      clearMessages(currentSessionId);
-      addSystemMessage(currentSessionId, t("chat.historyCleared"));
-    } else {
-      addSystemMessage(currentSessionId, t("chat.sessionCleared"));
-    }
-  }, [currentSessionId, clearClaudeSession, clearMessages, addSystemMessage, t]);
+    if (!currentSession?.projectPath) return;
+    createProjectSession(
+      currentSession.projectPath,
+      currentSession.model || settings.defaultModel || settings.model || "",
+      currentSession.permissionMode || settings.permissionMode || ""
+    );
+  }, [currentSession, createProjectSession, settings]);
 
   const handleOpenTerminal = useCallback(() => {
     if (currentSession?.projectPath) {
@@ -991,6 +1114,19 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
     if (stickToBottom.current) pinToBottom();
   }, [currentMessages, pinToBottom]);
 
+  // 出现待人工接管的交互(AskUserQuestion / ExitPlanMode / 工具授权)时，强制滚到
+  // 底部。这类卡片需要用户立即操作，不能被"用户上滑看历史"(stickToBottom=false)
+  // 抑制——否则卡片停在视口下方，用户会以为"提示要接管却找不到对话框"。
+  useEffect(() => {
+    if (!pendingInteraction) return;
+    stickToBottom.current = true;
+    pinToBottom();
+    // 卡片是较大的异步布局，补几帧确保稳定停到底部
+    const r = requestAnimationFrame(pinToBottom);
+    const t1 = setTimeout(pinToBottom, 120);
+    return () => { cancelAnimationFrame(r); clearTimeout(t1); };
+  }, [pendingInteraction?.requestId, pendingInteraction?.type, pinToBottom]);
+
   // 观察内容容器尺寸变化，兜住一切 React 状态之外的异步布局。用回调 ref 挂载，
   // 这样在消息视图/文件视图切换导致节点重建时也能正确重新观察。
   const msgContentRef = useCallback(
@@ -1015,6 +1151,27 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
     [currentMessages, visibleTurns]
   );
   const hasMoreTurns = msgStartIndex > 0;
+
+  // 待接管的 ask_user / exit_plan:正常由「最后一条 assistant 消息里对应的
+  // tool_use 块」内联渲染表单。但若流式重建导致那个块不在最后一条 assistant
+  // 消息里(或压根没进消息树),内联卡就不出现 → 用户看到侧边栏「等待接管」却
+  // 找不到对话框。这里检测该情况,必要时在底部渲染独立兜底卡(与工具授权卡一致)。
+  const fallbackInteractionTool = useMemo(() => {
+    const type = pendingInteraction?.type;
+    const name =
+      type === "ask_user" ? "AskUserQuestion" : type === "exit_plan" ? "ExitPlanMode" : null;
+    if (!name) return null;
+    let lastAsst = -1;
+    for (let i = currentMessages.length - 1; i >= 0; i--) {
+      if (currentMessages[i].role === "assistant") { lastAsst = i; break; }
+    }
+    const inlineWillRender =
+      lastAsst >= 0 &&
+      currentMessages[lastAsst].content.some(
+        (b) => b.type === "tool_use" && b.name === name
+      );
+    return inlineWillRender ? null : name;
+  }, [pendingInteraction?.type, pendingInteraction?.requestId, currentMessages]);
 
   // 加载更多轮次，并恢复滚动位置避免跳动
   const loadMoreTurns = useCallback(() => {
@@ -1171,11 +1328,14 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
       >
         <FolderOpen size={14} className="text-text-muted pointer-events-none" />
         <span
-          className="text-sm text-text-secondary truncate max-w-[50%] pointer-events-none"
+          className="text-sm text-text-secondary truncate max-w-[35%] pointer-events-none"
           title={currentSession?.projectPath}
         >
           {currentSession?.projectName}
         </span>
+        {currentSession?.projectPath && currentSessionId && (
+          <SessionSwitcher projectPath={currentSession.projectPath} currentSessionId={currentSessionId} />
+        )}
         {/* File preview indicator — toggle minimize/restore */}
         {openFiles.length > 0 && (
           <button
@@ -1189,6 +1349,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
           </button>
         )}
         <div className="flex-1 pointer-events-none" />
+
         {gitBranch && currentSession?.projectPath && currentSessionId && (
           <BranchDiffBadge
             branch={gitBranch}
@@ -1340,6 +1501,25 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
                 />
               )}
 
+              {/* 兜底:ask_user / exit_plan 的交互块不在消息树里时,独立渲染接管卡,
+                  保证「等待人工接管」时用户一定能看到并响应(不依赖消息树/滚动)。 */}
+              {fallbackInteractionTool && pendingInteraction && (
+                <div className="max-w-3xl mx-auto px-4 mb-4">
+                  <ToolCallCard
+                    block={{
+                      type: "tool_use",
+                      name: fallbackInteractionTool,
+                      id: pendingInteraction.requestId || "pending-interaction",
+                      input:
+                        pendingInteraction.input ||
+                        ({ questions: pendingInteraction.questions } as Record<string, unknown>),
+                    }}
+                    pendingInteraction={pendingInteraction}
+                    onRespond={handleRespond}
+                  />
+                </div>
+              )}
+
               {streamError && (
                 <div className="max-w-3xl mx-auto px-4 mb-4">
                   <div className="rounded-lg bg-error/10 border border-error/30 px-4 py-3 text-error text-sm">
@@ -1414,12 +1594,6 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
         )}
       </div>
     </div>
-
-    <NewSessionDialog
-      open={showNewSessionDialog}
-      onConfirm={handleNewSessionConfirm}
-      onCancel={() => setShowNewSessionDialog(false)}
-    />
     </>
   );
 }

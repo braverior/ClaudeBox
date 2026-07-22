@@ -456,6 +456,9 @@ const TabContent = memo(function TabContent({ filePath, isActive, onDirtyChange 
                     return <code className={className} {...rest}>{children}</code>;
                   },
                   pre({ children }) { return <>{children}</>; },
+                  table({ children }) {
+                    return <div className="md-table-wrap"><table>{children}</table></div>;
+                  },
                 }}
               >
                 {editContent}
